@@ -1,0 +1,13 @@
+version: "3.4"
+services:
+  builder:
+    image: emacs-builder
+    build:
+      dockerfile: Dockerfile
+      pull: true
+    volumes:
+      - ./:/build
+      - /usr/local:/usr/local
+    tty: true
+    stdin_open: true
+    entrypoint: ./entrypoint.sh

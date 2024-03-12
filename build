@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+#set -o xtrace
+set -e
+
+cd $(cd $(dirname "$0") && pwd)
+
+if ! command docker &>/dev/null; then
+  echo "ERROR: docker binary not found" >&2
+  exit 1
+elif [ -f /.dockerenv ]; then
+  echo "ERROR: cannot run this script from within Docker container" >&2
+  exit 1
+elif ! docker ps &> /dev/null; then
+  DOCKER="sudo docker"
+else
+  DOCKER="docker"
+fi
+
+$DOCKER compose run builder
+
+echo "done."
