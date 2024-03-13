@@ -1,8 +1,9 @@
 # Emacs Builder
 
-The Emacs Builder is a Docker-based tool designed to automate the building of Emacs, providing a
-comprehensive environment equipped with all necessary configurations and dependencies for advanced
-features such as native compilation, JSON support, and Tree Sitter integration.
+The Emacs Builder is a Docker-based tool designed to automate the building of Emacs in Ubuntu
+systems, providing a comprehensive environment equipped with all necessary configurations and
+dependencies for advanced features such as native compilation, JSON support, and Tree Sitter
+integration.
 
 ## Installation
 
@@ -31,6 +32,10 @@ version. Navigate into the Emacs directory and check out the desired tag or bran
 cd emacs
 git checkout <tag_or_branch_name>
 ```
+
+For users operating on different OS versions, you may also want to edit the base image in the `FROM`
+stanza in the Dockerfile to match your OS version and ensure that the Docker environment is fully
+compatible with your system, minimizing potential issues during the build process.
 
 To build Emacs, execute the following command from the root of the cloned repository:
 
