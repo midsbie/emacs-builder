@@ -35,7 +35,7 @@ git checkout <tag_or_branch_name>
 
 For users operating on different OS versions, you may also want to edit the base image in the `FROM`
 stanza in the Dockerfile to match your OS version and ensure that the Docker environment is fully
-compatible with your system, minimizing potential issues during the build process.
+compatible with your system, minimizing potential issues when running Emacs.
 
 To build Emacs, execute the following command from the root of the cloned repository:
 
