@@ -32,7 +32,7 @@ git config --global --add safe.directory $(pwd)
   --enable-link-time-optimization \
   --with-native-compilation --with-json --with-gnutls --with-jpeg --with-png \
   --with-rsvg --with-tiff --with-xft --with-xml2 --with-xpm \
-  --with-dbus --with-treesitter \
+  --with-dbus --with-tree-sitter \
   --without-pop \
   --without-wide-int
 
