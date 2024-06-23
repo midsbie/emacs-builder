@@ -1,6 +1,8 @@
-FROM ubuntu:23.04
+FROM ubuntu:24.04
 LABEL maintainer="Miguel Guedes <miguel.a.guedes@gmail.com>"
+
 WORKDIR /build
+
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
@@ -12,14 +14,15 @@ RUN apt-get update \
                         git \
                         gnupg-agent \
                         software-properties-common \
+                        sudo \
   && rm -rf /var/lib/apt/lists/*
 
-# Enable source packages so we can get all of Emacs' build deps for free.
-RUN sed -i 's/# deb-src/deb-src/' /etc/apt/sources.list \
+# Enable source packages so we can get all of Emacs' build deps for free. Note that system packages
+# are no longer in /etc/apt/sources.list .
+RUN sed -i 's/Types: deb/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources \
   && apt-get update \
   && apt-get build-dep -y emacs \
   && rm -rf /var/lib/apt/lists/*
-
 
 #  CONFIGURE OPTION            LIBRARIES
 # --------------------------  ----------------------------------------------------------------------
@@ -39,9 +42,8 @@ RUN add-apt-repository ppa:ubuntu-toolchain-r/ppa \
                         libtree-sitter-dev \
   && rm -rf /var/lib/apt/lists/*
 
-# Preventing the error:
-#   fatal: detected dubious ownership in repository at '/build/src'
-RUN git config --global --add safe.directory /build/src
+RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+USER ubuntu
 
 # Preventing obscure error messages when compiling libgccjit.
 ENV CC="gcc-10"

@@ -17,6 +17,6 @@ else
   DOCKER="docker"
 fi
 
-$DOCKER compose run builder
+$DOCKER compose --progress plain run builder
 
 echo "done."
