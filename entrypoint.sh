@@ -12,9 +12,9 @@ cd emacs
 #   '.git/config' -> '.git/config.~2~'
 #   git config transfer.fsckObjects 'true'
 #   fatal: not in a git directory
-git config --global --add safe.directory $(pwd)
+git config --add safe.directory $(pwd)
 
-# Configure and run
+git clean -fdx
 ./autogen.sh
 
 # Was using previously:
@@ -37,6 +37,6 @@ git config --global --add safe.directory $(pwd)
   --without-wide-int
 
 # This form was found to error out when building new major versions:
-#   make -j$(nproc --all) && make install
+#   make -j$(nproc --all) && sudo make install
 make -j$(nproc --all) bootstrap
 sudo make install

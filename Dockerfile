@@ -49,4 +49,4 @@ USER ubuntu
 ENV CC="gcc-10"
 
 # Defaulting to bash in support of manual runs.
-ENTRYPOINT ["bash"]
+CMD ["/usr/bin/bash"]

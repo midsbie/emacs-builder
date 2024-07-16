@@ -17,6 +17,8 @@ else
   DOCKER="docker"
 fi
 
-$DOCKER compose --progress plain run builder
+source ./env.sh
+$DOCKER compose --progress plain run --volume $(pwd):$(pwd) --workdir $(pwd) builder
+( cd emacs && sudo make install )
 
 echo "done."

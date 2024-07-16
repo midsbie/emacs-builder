@@ -4,9 +4,7 @@ services:
     build:
       dockerfile: Dockerfile
       pull: true
-    volumes:
-      - ./:/build
-      - /usr/local:/usr/local
     tty: true
     stdin_open: true
+    user: "${UID}:${GID}"
     entrypoint: ./entrypoint.sh
