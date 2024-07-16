@@ -12,6 +12,7 @@ RUN apt-get update \
                         git \
                         gnupg-agent \
                         software-properties-common \
+                        sudo \
   && rm -rf /var/lib/apt/lists/*
 
 # Enable source packages so we can get all of Emacs' build deps for free.
@@ -47,4 +48,4 @@ RUN git config --global --add safe.directory /build/src
 ENV CC="gcc-10"
 
 # Defaulting to bash in support of manual runs.
-ENTRYPOINT ["bash"]
+CMD ["/usr/bin/bash"]
