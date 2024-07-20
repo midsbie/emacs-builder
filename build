@@ -17,8 +17,34 @@ else
   DOCKER="docker"
 fi
 
+# Function to detect if the system has a GUI
+has_gui() {
+  if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+    return 0
+  elif dpkg -l | grep -E '^ii\s+(xorg|xserver|wayland|gnome|kde|xfce|lxde|mate)' >/dev/null; then
+    return 0
+  fi
+
+  return 1
+}
+
+if [ -z "$TARGET_ENV" ]; then
+  if has_gui; then
+    TARGET_ENV=x
+  else
+    TARGET_ENV=term
+  fi
+fi
+
 source ./env.sh
-$DOCKER compose --progress plain run --volume $(pwd):$(pwd) --workdir $(pwd) builder
+export TARGET_ENV
+
+$DOCKER compose --progress plain \
+        run \
+        --volume $(pwd):$(pwd) \
+        --workdir $(pwd) \
+        builder
+
 ( cd emacs && sudo make install )
 
 echo "done."

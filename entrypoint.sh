@@ -17,9 +17,6 @@ git config --add safe.directory $(pwd)
 git clean -fdx
 ./autogen.sh
 
-# Was using previously:
-# ./configure --with-native-compilation --with-mailutils
-
 # From `configure --help`:
 #
 #   --with-wide-int         prefer wide Emacs integers (typically 62-bit); on
@@ -28,13 +25,41 @@ git clean -fdx
 #
 # Disabled options:
 #    --with-imagemagick     one or more libraries are missing in 23.04
-./configure \
+CONFIGURE_OPTIONS="\
   --enable-link-time-optimization \
-  --with-native-compilation --with-json --with-gnutls --with-jpeg --with-png \
-  --with-rsvg --with-tiff --with-xft --with-xml2 --with-xpm \
-  --with-dbus --with-tree-sitter \
+  --with-native-compilation \
+  --with-json \
+  --with-gnutls \
+  --with-dbus \
+  --with-tree-sitter \
+  --with-xml2 \
   --without-pop \
-  --without-wide-int
+  --without-wide-int"
+
+readonly CONFIGURE_OPTIONS_X="\
+      --with-jpeg \
+      --with-png \
+      --with-rsvg \
+      --with-tiff \
+      --with-xft \
+      --with-xpm"
+
+case "$TARGET_ENV" in
+  term)
+    echo "I: configuring WITHOUT X support"
+    CONFIGURE_OPTIONS="$CONFIGURE_OPTIONS --without-x"
+    ;;
+  x)
+    echo "I: configuring with X support"
+    CONFIGURE_OPTIONS="$CONFIGURE_OPTIONS $CONFIGURE_OPTIONS_X"
+    ;;
+  *)
+    echo "I: unknown TARGET_ENV ($TARGET_ENV): defaulting to X support"
+    CONFIGURE_OPTIONS="$CONFIGURE_OPTIONS $CONFIGURE_OPTIONS_X"
+    ;;
+esac
+
+./configure $CONFIGURE_OPTIONS
 
 # This form was found to error out when building new major versions:
 #   make -j$(nproc --all) && sudo make install

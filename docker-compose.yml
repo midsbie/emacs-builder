@@ -4,6 +4,8 @@ services:
     build:
       dockerfile: Dockerfile
       pull: true
+    environment:
+      TARGET_ENV: ${TARGET_ENV}
     tty: true
     stdin_open: true
     user: "${UID}:${GID}"
