@@ -1,5 +1,18 @@
 #!/usr/bin/env bash
 
+# This script sets up and runs a Docker container to build Emacs, and optionally installs it.  The
+# user can export the TARGET_ENV variable with values "x" or "term" to force the build to target a
+# specific environment. If TARGET_ENV is not set, the script attempts to determine the correct
+# environment based on the presence of a GUI.
+#
+# Usage:
+#   To force the build to target a specific environment:
+#     export TARGET_ENV=x   # For GUI environment
+#     export TARGET_ENV=term # For terminal environment
+#
+#   Then run the script:
+#     ./build_emacs.sh
+
 #set -o xtrace
 set -e
 
