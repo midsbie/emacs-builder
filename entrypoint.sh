@@ -60,7 +60,9 @@ readonly CONFIGURE_OPTIONS_X="\
 case "$TARGET_ENV" in
   term)
     echo "I: configuring WITHOUT X support"
-    CONFIGURE_OPTIONS="$CONFIGURE_OPTIONS --without-x"
+    CONFIGURE_OPTIONS="$CONFIGURE_OPTIONS \
+      --without-x \
+      --with-sound=no"
     ;;
   x)
     echo "I: configuring with X support"
