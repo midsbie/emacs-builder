@@ -75,6 +75,5 @@ esac
 ./configure $CONFIGURE_OPTIONS
 
 # This form was found to error out when building new major versions:
-#   make -j$(nproc --all) && sudo make install
+#   make -j$(nproc --all)
 make -j$(nproc --all) bootstrap
-sudo make install
