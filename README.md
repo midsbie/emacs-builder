@@ -12,16 +12,16 @@ these steps to set up Emacs Builder:
 
 1. Clone this repository to your local machine:
 
-```bash
-git clone git@github.com:midsbie/emacs-builder.git
-cd emacs-builder
-```
+    ```bash
+    git clone git@github.com:midsbie/emacs-builder.git
+    cd emacs-builder
+    ```
 
 2. Initialize the submodule
 
-```bash
-git submodule update --init
-```
+    ```bash
+    git submodule update --init
+    ```
 
 ## Usage
 
@@ -46,6 +46,28 @@ To build Emacs, execute the following command from the root of the cloned reposi
 This script builds the Docker image if necessary, instantiates the container, and automatically
 starts the compilation process of Emacs. The build artifacts will be placed under your system's
 `/usr/local` directory, making Emacs binaries accessible outside the Docker environment.
+
+### Target Environment
+
+The build script allows you to specify the target environment for Emacs. You can export the
+`TARGET_ENV` variable with values `x` or `term` to force the build to target a specific environment:
+
+- `x` for GUI environment
+- `term` for terminal environment
+
+If `TARGET_ENV` is not set, the script attempts to determine the correct environment based on the
+presence of a GUI.
+
+```bash
+export TARGET_ENV=x    # For GUI environment
+export TARGET_ENV=term # For terminal environment
+```
+
+Then run the build script:
+
+```bash
+./build
+```
 
 ## Contributing
 
