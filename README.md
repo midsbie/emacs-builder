@@ -70,6 +70,20 @@ Then run the build script:
 ./build
 ```
 
+### Required Packages for Term Environment Builds
+
+For `term` environment builds, ensure that the following packages are installed:
+
+- `liblcms2-2`
+- `libgccjit0`
+- `libtree-sitter0`
+
+You can install these packages with the following command on Ubuntu 24.04:
+
+```bash
+sudo apt install liblcms2-2 libgccjit0 libtree-sitter0
+```
+
 ## Contributing
 
 Contributions are what make the open-source community such an amazing place to learn, inspire, and
