@@ -3,19 +3,10 @@
 #set -o xtrace
 set -e
 
-cd $(cd $(dirname "$0") && pwd)
-
-if ! command docker &>/dev/null; then
-  echo "ERROR: docker binary not found" >&2
-  exit 1
-elif [ -f /.dockerenv ]; then
-  echo "ERROR: cannot run this script from within Docker container" >&2
-  exit 1
-elif ! docker ps &> /dev/null; then
-  DOCKER="sudo docker"
-else
-  DOCKER="docker"
-fi
+fatal() {
+    echo "$@" >&2
+    exit 1
+}
 
 # Function to detect if the system has a GUI
 has_gui() {
@@ -27,6 +18,32 @@ has_gui() {
 
   return 1
 }
+
+cd $(cd $(dirname "$0") && pwd)
+
+if [ "$(id -u)" -ne 0 ]; then
+  ELEVATE="sudo"
+
+  if ! command -v sudo &>/dev/null; then
+    fatal "ERROR: sudo binary not found. Please install sudo."
+  fi
+else
+  ELEVATE=""
+fi
+
+if ! command -v docker &>/dev/null; then
+  fatal "ERROR: docker binary not found. Please install the Docker engine."
+elif [ -f /.dockerenv ]; then
+  fatal "ERROR: cannot run this script from within a Docker container."
+elif ! docker ps &> /dev/null; then
+  DOCKER="sudo docker"
+else
+  DOCKER="docker"
+fi
+
+if ! command -v make &>/dev/null; then
+  fatal "ERROR: make command not found. Please install make."
+fi
 
 if [ -z "$TARGET_ENV" ]; then
   if has_gui; then
@@ -45,6 +62,6 @@ $DOCKER compose --progress plain \
         --workdir $(pwd) \
         builder
 
-( cd emacs && sudo make install )
+( cd emacs && $ELEVATE make install )
 
 echo "done."
