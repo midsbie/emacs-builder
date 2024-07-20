@@ -44,8 +44,9 @@ To build Emacs, execute the following command from the root of the cloned reposi
 ```
 
 This script builds the Docker image if necessary, instantiates the container, and automatically
-starts the compilation process of Emacs. The build artifacts will be placed under your system's
-`/usr/local` directory, making Emacs binaries accessible outside the Docker environment.
+starts the compilation process of Emacs. After the build process completes, the script calls `sudo
+make install`, which installs the build artifacts under your system's `/usr/local` directory, making
+Emacs binaries accessible outside the Docker environment.
 
 ### Target Environment
 
