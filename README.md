@@ -48,40 +48,44 @@ starts the compilation process of Emacs. After the build process completes, the 
 make install`, which installs the build artifacts under your system's `/usr/local` directory, making
 Emacs binaries accessible outside the Docker environment.
 
-### Target Environment
+### Build Modes
 
-The build script allows you to specify the target environment for Emacs. You can export the
-`TARGET_ENV` variable with values `x` or `term` to force the build to target a specific environment:
+The build script automatically detects the appropriate build mode based on the host system:
 
-- `x` for GUI environment
-- `term` for terminal environment
+- **X11 build** (`x`): If X11 libraries are detected (`libx11-6`), builds with full GUI support
+  including X11, DBus, and image libraries.
+- **Server build** (`server`): If X11 libraries are not found, builds for headless environments
+  without X11, DBus, or desktop integration.
 
-If `TARGET_ENV` is not set, the script attempts to determine the correct environment based on the
-presence of a GUI.
-
-```bash
-export TARGET_ENV=x    # For GUI environment
-export TARGET_ENV=term # For terminal environment
-```
-
-Then run the build script:
+To force a server build on a system with X11 libraries installed, use the `--server` flag:
 
 ```bash
-./build
+./build --server
 ```
 
-### Required Packages for Term Environment Builds
+| Feature         | X11 build     | Server build     |
+|-----------------|---------------|------------------|
+| X11             | Yes           | No               |
+| DBus            | Yes           | No               |
+| GConf/GSettings | Yes           | No               |
+| Image libraries | Yes           | No               |
+| Sound           | Yes           | No               |
+| Docker image    | Full (~1.2GB) | Minimal (~400MB) |
 
-For `term` environment builds, ensure that the following packages are installed:
+### Required Runtime Packages
 
-- `liblcms2-2`
-- `libgccjit0`
-- `libtree-sitter0`
+After building, ensure the following packages are installed on the system where Emacs will run.
 
-You can install these packages with the following command on Ubuntu 24.04:
+**For X11 builds:**
 
 ```bash
 sudo apt install liblcms2-2 libgccjit0 libtree-sitter0
+```
+
+**For server builds:**
+
+```bash
+sudo apt install libgccjit0 libtree-sitter0 libjansson4 libgnutls30 libncurses6 libxml2
 ```
 
 ## Contributing

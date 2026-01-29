@@ -12,3 +12,17 @@ services:
     stdin_open: true
     user: "${UID}:${GID}"
     entrypoint: ./entrypoint.sh
+
+  builder-server:
+    image: emacs-builder-server
+    build:
+      dockerfile: Dockerfile.server
+      pull: true
+    environment:
+      TARGET_ENV: ${TARGET_ENV}
+      TREESITTER_SOURCE: ${TREESITTER_SOURCE:-}
+      TREESITTER_VERSION: ${TREESITTER_VERSION:-}
+    tty: true
+    stdin_open: true
+    user: "${UID}:${GID}"
+    entrypoint: ./entrypoint.sh

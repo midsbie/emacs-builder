@@ -8,15 +8,35 @@ fatal() {
     exit 1
 }
 
-# Function to detect if the system has a GUI
-has_gui() {
-  if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
-    return 0
-  elif dpkg -l | grep -E '^ii\s+(xorg|xserver|wayland|gnome|kde|xfce|lxde|mate)' >/dev/null; then
-    return 0
-  fi
+usage() {
+    echo "Usage: $0 [OPTIONS]"
+    echo
+    echo "Options:"
+    echo "  --server    Build for server/headless environments (no X11, no DBus)"
+    echo "  --help      Show this help message"
+    exit 0
+}
 
-  return 1
+# Parse command line arguments
+SERVER_BUILD=0
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --server)
+      SERVER_BUILD=1
+      shift
+      ;;
+    --help|-h)
+      usage
+      ;;
+    *)
+      fatal "Unknown option: $1"
+      ;;
+  esac
+done
+
+# Check if host system can run X11 builds
+can_build_x11() {
+  dpkg -s libx11-6 &>/dev/null
 }
 
 cd $(cd $(dirname "$0") && pwd)
@@ -45,12 +65,18 @@ if ! command -v make &>/dev/null; then
   fatal "ERROR: make command not found. Please install make."
 fi
 
-if [ -z "$TARGET_ENV" ]; then
-  if has_gui; then
-    TARGET_ENV=x
-  else
-    TARGET_ENV=term
-  fi
+if [ "$SERVER_BUILD" -eq 1 ]; then
+  TARGET_ENV=server
+  BUILDER_SERVICE=builder-server
+  echo "I: building for server/headless environment"
+elif can_build_x11; then
+  TARGET_ENV=x
+  BUILDER_SERVICE=builder
+  echo "I: X11 libraries detected, building with GUI support"
+else
+  TARGET_ENV=server
+  BUILDER_SERVICE=builder-server
+  echo "I: X11 libraries not found, building for server/headless environment"
 fi
 
 source ./env.sh
@@ -88,7 +114,7 @@ $DOCKER compose --progress plain \
         --volume $(pwd):$(pwd) \
         --workdir $(pwd) \
         $TREESITTER_VOLUMES \
-        builder
+        $BUILDER_SERVICE
 
 ( cd emacs && $ELEVATE make install )
 
