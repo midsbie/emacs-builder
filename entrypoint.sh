@@ -18,6 +18,36 @@ set -e
 
 cd emacs
 
+# Configure tree-sitter from source if mounted
+if [ -n "$TREESITTER_SOURCE" ] && [ -d "/opt/tree-sitter/lib" ]; then
+  echo "I: configuring tree-sitter from source installation"
+
+  # Create pkgconfig directory and generate tree-sitter.pc with container paths
+  mkdir -p /tmp/tree-sitter-pkgconfig
+  cat > /tmp/tree-sitter-pkgconfig/tree-sitter.pc << EOF
+prefix=/opt/tree-sitter
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: tree-sitter
+Description: An incremental parsing system for programming tools
+URL: https://tree-sitter.github.io/tree-sitter/
+Version: ${TREESITTER_VERSION:-0.0.0}
+Libs: -L\${libdir} -ltree-sitter
+Cflags: -I\${includedir}
+EOF
+
+  export PKG_CONFIG_PATH="/tmp/tree-sitter-pkgconfig:${PKG_CONFIG_PATH:-}"
+  export LD_LIBRARY_PATH="/opt/tree-sitter/lib:${LD_LIBRARY_PATH:-}"
+
+  # Verify tree-sitter is detectable
+  if pkg-config --exists tree-sitter; then
+    echo "I: tree-sitter version $(pkg-config --modversion tree-sitter) detected"
+  else
+    echo "W: pkg-config cannot find tree-sitter, build may fall back to apt version"
+  fi
+fi
+
 # Prevent the following error when running ./autogen.sh:
 #
 #   Running 'autoreconf -fi -I m4' ...

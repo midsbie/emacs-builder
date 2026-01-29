@@ -56,10 +56,38 @@ fi
 source ./env.sh
 export TARGET_ENV
 
+# Detect tree-sitter installation
+# Priority: source installation (~/src/tree-sitter) > apt package
+TREESITTER_VOLUMES=""
+TREESITTER_SOURCE_DIR="${TREESITTER_SOURCE_DIR:-$HOME/src/tree-sitter}"
+
+if [ -f "$TREESITTER_SOURCE_DIR/tree-sitter.pc" ]; then
+  # Source installation detected via symlink/directory at ~/src/tree-sitter
+  # Read prefix and version from tree-sitter.pc
+  TS_PREFIX=$(grep "^prefix=" "$TREESITTER_SOURCE_DIR/tree-sitter.pc" | cut -d= -f2)
+  TS_VERSION=$(grep "^Version:" "$TREESITTER_SOURCE_DIR/tree-sitter.pc" | cut -d: -f2 | tr -d ' ')
+  TS_LIBDIR="${TS_PREFIX}/lib"
+  TS_INCLUDEDIR="${TS_PREFIX}/include"
+
+  if [ -d "$TS_LIBDIR" ] && [ -d "$TS_INCLUDEDIR" ]; then
+    echo "I: using tree-sitter $TS_VERSION from source installation at $TS_PREFIX"
+    TREESITTER_VOLUMES="--volume $TS_LIBDIR:/opt/tree-sitter/lib:ro --volume $TS_INCLUDEDIR:/opt/tree-sitter/include:ro"
+    export TREESITTER_SOURCE=1
+    export TREESITTER_VERSION="$TS_VERSION"
+  else
+    echo "W: tree-sitter.pc found but libraries not at $TS_LIBDIR - falling back to apt package"
+  fi
+elif dpkg -s libtree-sitter0 &>/dev/null; then
+  echo "I: using tree-sitter from apt package (libtree-sitter0)"
+else
+  echo "W: no tree-sitter installation detected - build may fail"
+fi
+
 $DOCKER compose --progress plain \
         run \
         --volume $(pwd):$(pwd) \
         --workdir $(pwd) \
+        $TREESITTER_VOLUMES \
         builder
 
 ( cd emacs && $ELEVATE make install )
