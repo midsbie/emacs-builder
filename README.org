@@ -1,0 +1,105 @@
+#+TITLE: Emacs Builder
+
+Builds Emacs from source in a Docker container and installs it on an Ubuntu 26.04 LTS host. The image carries the dependencies for native compilation and tree-sitter.
+
+* Requirements
+
+- Docker Engine
+- =make=
+- =sudo=, unless run as root
+
+* Setup
+
+#+begin_src sh
+git clone git@github.com:midsbie/emacs-builder.git
+cd emacs-builder
+git submodule update --init
+#+end_src
+
+* Usage
+
+** Version
+
+The =emacs= submodule is pinned to a release tag (=emacs-31.1=). To build another version, check out a tag or branch in the submodule:
+
+#+begin_src sh
+cd emacs
+git checkout <tag-or-branch>
+#+end_src
+
+** Build
+
+#+begin_src sh
+./build
+#+end_src
+
+1. Builds the Docker image; rebuilds it when the Dockerfile or base image changes.
+2. Compiles Emacs in the container.
+3. Runs =sudo make install= on the host, installing into =/usr/local=.
+
+** Build modes
+
+Selected by host detection:
+
+- =x= :: =libx11-6= installed. GUI build.
+- =server= :: =libx11-6= absent. Headless build.
+
+Force =server=:
+
+#+begin_src sh
+./build --server
+#+end_src
+
+| Feature         | =x=     | =server= |
+|-----------------+---------+----------|
+| X11             | yes     | no       |
+| DBus            | yes     | no       |
+| GConf/GSettings | yes     | no       |
+| Image libraries | yes     | no       |
+| Sound           | yes     | no       |
+
+* Compatibility
+
+** Base image
+
+Emacs links against the image's libraries. The =FROM= base image in =Dockerfile= and =Dockerfile.server= must match the host's Ubuntu release. Current target: Ubuntu 26.04 LTS.
+
+After a release upgrade, update =FROM= and rebuild. A binary built for the previous release can fail to start if the upgrade removes a linked library; e.g. 26.04 drops =libxml2.so.2=.
+
+** Native compilation
+
+The GCC that builds Emacs must match the =libgccjit= it links against. When changing =FROM=, verify that:
+
+- =CC= and the =libgccjit-N-dev= package in both Dockerfiles name a GCC version the release provides.
+- The matching =libgccjit= runtime package is installed on the host.
+
+** Tree-sitter
+
+- Library :: =libtree-sitter-dev= from the image: tree-sitter 0.25 on Ubuntu 26.04. Loads ABI 15 grammars, e.g. the Rust and PHP grammars installed by Emacs 31.1.
+- Runtime :: =libtree-sitter0.25= on the host.
+- Upgrades :: The soname carries the minor version (=libtree-sitter.so.0.25=), so Emacs stays bound to the version it was built against. Rebuild when a release upgrade changes the minor version.
+- Grammars :: No system-wide install. Emacs 31+ installs them on demand into =~/.emacs.d/tree-sitter= (see =treesit-auto-install-grammar=); requires =git= and a C compiler on the host. Manual install: =M-x treesit-install-language-grammar=.
+
+* Runtime dependencies
+
+Install on the host that runs Emacs.
+
+=x=:
+
+#+begin_src sh
+sudo apt install libgccjit0 liblcms2-2 libtree-sitter0.25
+#+end_src
+
+=server=:
+
+#+begin_src sh
+sudo apt install libgccjit0 libgnutls30t64 libncurses6 libtree-sitter0.25 libxml2-16
+#+end_src
+
+* Contributing
+
+Issues and pull requests welcome.
+
+* License
+
+MIT. See [[file:LICENSE][LICENSE]].
