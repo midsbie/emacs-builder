@@ -6,8 +6,6 @@ services:
       pull: true
     environment:
       TARGET_ENV: ${TARGET_ENV}
-      TREESITTER_SOURCE: ${TREESITTER_SOURCE:-}
-      TREESITTER_VERSION: ${TREESITTER_VERSION:-}
     tty: true
     stdin_open: true
     user: "${UID}:${GID}"
@@ -20,8 +18,6 @@ services:
       pull: true
     environment:
       TARGET_ENV: ${TARGET_ENV}
-      TREESITTER_SOURCE: ${TREESITTER_SOURCE:-}
-      TREESITTER_VERSION: ${TREESITTER_VERSION:-}
     tty: true
     stdin_open: true
     user: "${UID}:${GID}"
