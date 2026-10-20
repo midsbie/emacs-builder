@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+fatal() {
+    printf 'runtime: %s\n' "$*" >&2
+    exit 1
+}
+
+usage() {
+    cat <<'EOF'
+Usage: runtime build VERSION
+       runtime --help
+
+Build a retained Docker image from a version recipe.
+EOF
+}
+
+build_image() (
+    local version=$1
+    local recipe="$root/runtimes/$version"
+    local tag="emacs-builder-runtime:$version"
+    local revision source_status dirty=false
+    local inputs scratch container='' image_id record
+    local cleanup_status=0
+
+    for command in docker git sha256sum find sort xargs mktemp; do
+        command -v "$command" >/dev/null || fatal "required command not found: $command"
+    done
+
+    revision=$(git -C "$root" rev-parse --verify HEAD) \
+      || fatal "build requires a Git checkout of emacs-builder"
+
+    source_status=$(
+        git -C "$root" status --porcelain --untracked-files=all -- \
+            runtime "runtimes/$version"
+    )
+    if [[ -n $source_status ]]; then
+        dirty=true
+    fi
+
+    inputs=$(
+        cd -- "$root"
+        sha256sum -- runtime
+        find "runtimes/$version" -type f -print0 | sort -z | xargs -0 sha256sum --
+    )
+
+    docker info >/dev/null \
+      || fatal "cannot access Docker; check the daemon and your Docker permissions"
+
+    mkdir -p -- "$root/.runtime/builds"
+    scratch=$(mktemp -d "$root/.runtime/builds/.build-XXXXXXXX")
+    trap '
+        cleanup_status=$?
+        if [[ -n $container ]]; then
+            docker container rm "$container" >/dev/null || true
+        fi
+        rm -rf -- "$scratch"
+        exit "$cleanup_status"
+    ' EXIT
+
+    printf 'runtime: building %s\n' "$tag" >&2
+    docker build \
+        --tag "$tag" \
+        --iidfile "$scratch/image-id" \
+        --build-arg "BUILDER_REVISION=$revision" \
+        --build-arg "BUILDER_DIRTY=$dirty" \
+        --build-arg "BUILDER_INPUTS=$inputs" \
+        "$recipe" >&2
+
+    image_id=$(<"$scratch/image-id")
+    container=$(docker create --pull=never --network=none --read-only --entrypoint /bin/true "$image_id")
+    docker cp "$container:/usr/local/share/emacs-runtime/build-info" "$scratch/build-info"
+    record="$root/.runtime/builds/${image_id#sha256:}.txt"
+    {
+        printf 'image-id: %s\nimage-tag: %s\n\n' "$image_id" "$tag"
+        cat "$scratch/build-info"
+    } > "$scratch/record"
+    mv -- "$scratch/record" "$record"
+    printf 'runtime: built %s (%s)\nruntime: build record %s\n' "$tag" "$image_id" "$record" >&2
+)
+
+case ${1-} in
+    --help|-h)
+        [[ $# -eq 1 ]] || fatal "--help takes no arguments"
+        usage
+        exit 0
+        ;;
+    build)
+        [[ $# -eq 2 ]] || fatal "usage: runtime build VERSION"
+        ;;
+    *)
+        usage >&2
+        exit 1
+        ;;
+esac
+
+root=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+version=$2
+[[ $version =~ ^[0-9]+(\.[0-9]+)+$ && -f $root/runtimes/$version/Dockerfile ]] \
+    || fatal "unsupported version: $version"
+build_image "$version"
