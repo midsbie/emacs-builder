@@ -25,25 +25,46 @@ EOF
 
 declare -A recipe=()
 
-read_recipe() {
-    local file=$1/recipe line key value
+read_metadata() {
+    local file=$1 kind=$2 line key value
+    local -n fields=$3
 
-    recipe=()
+    fields=()
 
     while IFS= read -r line || [[ -n $line ]]; do
         [[ -z $line || $line == \#* ]] && continue
-        [[ $line == *=* ]] || fatal "invalid recipe line in $file: $line"
+        [[ $line == *=* ]] || fatal "invalid $kind line in $file: $line"
 
         key=${line%%=*}
         value=${line#*=}
-        case $key in
-            source|url|sha256|version|ref|path|builder|variants) ;;
-            *) fatal "unknown recipe key in $file: $key" ;;
-        esac
-
-        [[ ! -v recipe[$key] ]] || fatal "duplicate recipe key in $file: $key"
-        recipe[$key]=$value
+        [[ ! -v fields[$key] ]] || fatal "duplicate $kind key in $file: $key"
+        fields["$key"]=$value
     done < "$file"
+}
+
+# Refuse keys of the associative array METADATA, read from FILE, other than KEYS.
+check_keys() {
+    local file=$1 kind=$2 key
+    local -n metadata=$3
+    local -A allowed=()
+    shift 3
+
+    for key; do allowed[$key]=1; done
+    for key in "${!metadata[@]}"; do
+        [[ -v allowed[$key] ]] || fatal "unknown $kind key in $file: $key"
+    done
+}
+
+read_recipe() {
+    local file=$1/recipe
+
+    read_metadata "$file" recipe recipe
+    case ${recipe[source]-} in
+        tarball) check_keys "$file" 'tarball recipe' recipe source url sha256 version builder ;;
+        git) check_keys "$file" 'git recipe' recipe source url ref version builder ;;
+        '') fatal "recipe has no source: $file" ;;
+        *) fatal "unknown source in $file: ${recipe[source]}" ;;
+    esac
 }
 
 # Set source_sha256 and source_info in the caller and put the recipe's source in SCRATCH/source.
@@ -194,6 +215,7 @@ build_image() (
     local inputs scratch container='' image_id record builder builder_directory variants
     local variant='' variant_seen=false
     local variant_options=() builder_paths=("recipes/$name") declared_variants=()
+    local -A builder_metadata=()
     local cleanup_status=0
 
     while (( $# )); do
@@ -210,19 +232,26 @@ build_image() (
     done
 
     read_recipe "$directory"
-    [[ -n ${recipe[source]-} ]] \
-        || fatal "recipe has no source: $directory/recipe"
 
     builder=${recipe[builder]:-$name}
     [[ $builder =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
         || fatal "invalid builder name: $builder"
 
-    builder_directory="$root/recipes/$builder"
-    [[ -f $builder_directory/recipe && \
-           -f $builder_directory/Dockerfile && -f $builder_directory/build.sh ]] \
-        || fatal "builder requires recipe, Dockerfile and build.sh: $builder"
+    builder_directory=$directory
+    if [[ -n ${recipe[builder]-} ]]; then
+        builder_directory="$root/builders/$builder"
+        [[ -f $builder_directory/builder ]] \
+            || fatal "builder metadata not found: $builder_directory/builder"
+        builder_paths+=("builders/$builder")
+    fi
+    [[ -f $builder_directory/Dockerfile && -f $builder_directory/build.sh ]] \
+        || fatal "builder requires Dockerfile and build.sh: $builder"
 
-    variants=$(read_recipe "$builder_directory"; printf '%s' "${recipe[variants]-}")
+    if [[ -f $builder_directory/builder ]]; then
+        read_metadata "$builder_directory/builder" builder builder_metadata
+        check_keys "$builder_directory/builder" builder builder_metadata variants
+    fi
+    variants=${builder_metadata[variants]-}
     if [[ -n $variants ]]; then
         read -r -a declared_variants <<< "$variants"
         if [[ $variant_seen == false ]]; then
@@ -241,7 +270,6 @@ build_image() (
     fi
 
     if [[ ${recipe[source]} == git ]]; then read_git_lock "$directory"; fi
-    if [[ $builder != "$name" ]]; then builder_paths+=("recipes/$builder"); fi
 
     for command in docker git sha256sum find sort xargs mktemp curl tar; do
         command -v "$command" >/dev/null || fatal "required command not found: $command"
