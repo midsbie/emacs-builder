@@ -130,19 +130,34 @@ materialize_tarball() {
 }
 
 materialize_git() {
-    local scratch=$1 mirror="$root/.emacsen/sources/emacs.git"
+    local scratch=$1 mirror="$root/.emacsen/sources/emacs.git" bare
 
-    if [[ ! -d $mirror ]]; then
-        git init --bare "$mirror" >&2
+    if [[ ! -e $mirror && ! -L $mirror ]]; then
+        git init --bare "$mirror" >&2 \
+            || fatal "cannot initialise source Git cache: $mirror"
     fi
-    if ! git -C "$mirror" cat-file -e "$source_commit^{commit}" 2>/dev/null; then
-        git -C "$mirror" fetch --depth 1 --no-tags "${recipe[url]}" "$source_commit" >&2
+
+    [[ -d $mirror ]] \
+        || fatal "source Git cache is not a directory: $mirror"
+    bare=$(git --git-dir="$mirror" rev-parse --is-bare-repository 2>/dev/null) \
+        || fatal "source Git cache is not a valid repository: $mirror"
+    [[ $bare == true ]] \
+        || fatal "source Git cache is not a bare repository: $mirror"
+
+    if ! git --git-dir="$mirror" cat-file -e "$source_commit" 2>/dev/null; then
+        git --git-dir="$mirror" fetch --depth 1 --no-tags "${recipe[url]}" "$source_commit" >&2 \
+            || fatal "cannot fetch locked source commit $source_commit from ${recipe[url]}"
     fi
+
+    git --git-dir="$mirror" cat-file -e "$source_commit^{commit}" 2>/dev/null \
+        || fatal "locked source does not resolve to a commit: $source_commit"
 
     # Keep cached commits reachable without following a moving upstream ref.
-    git -C "$mirror" update-ref "refs/emacsen/$source_commit" "$source_commit"
-    git -C "$mirror" archive --format=tar --prefix=emacs/ "$source_commit" \
-        > "$scratch/source/archive"
+    git --git-dir="$mirror" update-ref "refs/emacsen/$source_commit" "$source_commit" \
+        || fatal "cannot retain locked source commit $source_commit in cache: $mirror"
+    git --git-dir="$mirror" archive --format=tar --prefix=emacs/ "$source_commit" \
+        > "$scratch/source/archive" \
+        || fatal "cannot archive locked source commit $source_commit from cache: $mirror"
 
     source_sha256=$(sha256sum -- "$scratch/source/archive")
     source_sha256=${source_sha256%% *}
