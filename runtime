@@ -14,7 +14,7 @@ Usage: runtime build VERSION
 
 Build a retained Docker image from a version recipe.
 Run that local image with DIR (default: current directory) read-only at /work.
-With no Emacs arguments, open terminal Emacs when attached to a terminal.
+When attached to a terminal, provide a terminal inside the container.
 Run never builds or pulls an image. Emacs arguments are passed unchanged.
 EOF
 }
@@ -130,7 +130,7 @@ run_image() {
         gid=65534               # "nogroup"
     fi
 
-    if [[ $# -eq 0 && -t 0 && -t 1 ]]; then
+    if [[ -t 0 && -t 1 ]]; then
         terminal_options=(--tty --env "TERM=${TERM:-xterm}")
     fi
 
