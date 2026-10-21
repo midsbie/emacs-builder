@@ -9,9 +9,12 @@ fatal() {
 usage() {
     cat <<'EOF'
 Usage: runtime build VERSION
+       runtime run VERSION [--directory DIR] -- EMACS-ARGS...
        runtime --help
 
 Build a retained Docker image from a version recipe.
+Run that local image with DIR (default: current directory) read-only at /work.
+Run never builds or pulls an image. Emacs arguments are passed unchanged.
 EOF
 }
 
@@ -79,6 +82,70 @@ build_image() (
     printf 'runtime: built %s (%s)\nruntime: build record %s\n' "$tag" "$image_id" "$record" >&2
 )
 
+run_image() {
+    local version=$1
+    shift
+    local directory=. directory_seen=false delimiter_seen=false
+    local project mount_source image_id uid gid
+    local tag="emacs-builder-runtime:$version"
+
+    while (( $# )); do
+        case $1 in
+            --directory)
+                [[ $directory_seen == false ]] || fatal "--directory may be specified only once"
+                [[ $# -ge 2 && $2 != -- ]] || fatal "--directory requires a directory"
+                directory=$2
+                directory_seen=true
+                shift 2
+                ;;
+            --)
+                delimiter_seen=true
+                shift
+                break
+                ;;
+            *)
+                fatal "expected --directory DIR or -- before Emacs arguments"
+                ;;
+        esac
+    done
+
+    [[ $delimiter_seen == true ]] \
+      || fatal "usage: runtime run VERSION [--directory DIR] -- EMACS-ARGS..."
+
+    # The suffix preserves directory names ending in newlines through substitution.
+    project=$(CDPATH='' cd -P -- "$directory" 2>/dev/null && printf '%s/.' "$PWD") \
+      || fatal "not an accessible directory: $directory"
+    project=${project%/.}
+
+    command -v docker >/dev/null || fatal "required command not found: docker"
+    if ! image_id=$(docker image inspect --format '{{.Id}}' "$tag" 2>/dev/null); then
+        docker info >/dev/null 2>&1 \
+          || fatal "cannot access Docker; check the daemon and your Docker permissions"
+        fatal "local image $tag is missing; build it with: $root/runtime build $version"
+    fi
+    [[ $image_id =~ ^sha256:[0-9a-f]{64}$ ]] || fatal "invalid image identity returned for $tag"
+
+    uid=$(id -u)
+    gid=$(id -g)
+    if [[ $uid == 0 ]]; then
+        uid=65534               # Use the "nobody" user inside the container for root on the host.
+        gid=65534               # "nogroup"
+    fi
+
+    # Quote Docker's CSV field; /. also protects trailing path whitespace.
+    mount_source=${project//\"/\"\"}/.
+    printf 'runtime: image %s (%s)\nruntime: mounting %s at /work (read-only)\n' \
+        "$tag" "$image_id" "$project" >&2
+    exec docker run --rm --pull=never --interactive \
+        --network=none --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+        --user "$uid:$gid" --workdir /work \
+        --env HOME=/home/runtime --env TMPDIR=/tmp --env LANG=C.UTF-8 \
+        --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
+        --tmpfs "/home/runtime:rw,nosuid,nodev,mode=700,uid=$uid,gid=$gid" \
+        --mount "type=bind,\"source=$mount_source\",target=/work,readonly,bind-propagation=rprivate,bind-recursive=readonly" \
+        "$image_id" "$@"
+}
+
 case ${1-} in
     --help|-h)
         [[ $# -eq 1 ]] || fatal "--help takes no arguments"
@@ -87,6 +154,9 @@ case ${1-} in
         ;;
     build)
         [[ $# -eq 2 ]] || fatal "usage: runtime build VERSION"
+        ;;
+    run)
+        [[ $# -ge 3 ]] || fatal "usage: runtime run VERSION [--directory DIR] -- EMACS-ARGS..."
         ;;
     *)
         usage >&2
@@ -98,4 +168,9 @@ root=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 version=$2
 [[ $version =~ ^[0-9]+(\.[0-9]+)+$ && -f $root/runtimes/$version/Dockerfile ]] \
     || fatal "unsupported version: $version"
-build_image "$version"
+action=$1
+shift 2
+case $action in
+    build) build_image "$version" ;;
+    run) run_image "$version" "$@" ;;
+esac
