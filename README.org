@@ -1,6 +1,6 @@
 #+TITLE: Emacs Builder
 
-Builds Emacs from source in a Docker container and installs it on an Ubuntu 26.04 LTS host. The image carries the dependencies for native compilation and tree-sitter.
+Builds Emacs from source in a Docker container and installs it on an Ubuntu 26.04 LTS host. The image carries the dependencies for native compilation and tree-sitter. Separately, [[*Isolated Emacs versions][=./runtime=]] runs older Emacs releases in containers for compatibility testing.
 
 * Requirements
 
@@ -96,9 +96,73 @@ sudo apt install libgccjit0 liblcms2-2 libtree-sitter0.25
 sudo apt install libgccjit0 libgnutls30t64 libncurses6 libtree-sitter0.25 libxml2-16
 #+end_src
 
-* Contributing
+* Isolated Emacs versions
 
-Issues and pull requests welcome.
+[[file:runtime][=./runtime=]] builds Emacs releases into retained Docker images and runs a project's Lisp against them, e.g. to test a package against its minimum supported Emacs. It is independent of =./build=: the two share no sources, build workspace or installation, and =./runtime= needs neither the =emacs= submodule nor a host Emacs.
+
+Requires Bash, Git, GNU coreutils and findutils, and access to Docker Engine 25+ on Linux 5.12+. Both versions are needed for the recursive read-only project mount; on older systems =run= and =exec= fail rather than weaken it.
+
+#+begin_src sh
+./runtime --help
+./runtime build 26.3
+./runtime run 26.3           # Terminal Emacs in the current directory
+./runtime run 26.3 -- -Q     # Disable initialization files
+./runtime exec 26.3 -- bash  # Shell in the same isolated container
+#+end_src
+
+** Recipes
+
+Each =runtimes/VERSION/= directory is one release's recipe, the authority for its base image digest, source checksum, compiler, dependencies and configure options. Every command requires VERSION's recipe in the checkout: =run= and =exec= reject a VERSION without one even when its image exists. Images keep a POSIX shell and coreutils; the =exec= examples rely on them.
+
+- [[file:runtimes/26.3/][26.3]] :: Ubuntu 20.04, =linux/amd64=; terminal and batch only (no X11), with GnuTLS, XML and zlib. Emacs 26.3's executable dumper fails under Docker's default seccomp profile, so the recipe uses the supported =CANNOT_DUMP=yes= configuration instead of loosening container security. Cost: standard Lisp loads at every start, which is slower and more verbose, and =dump-emacs= is unavailable.
+
+** Build
+
+=./runtime build VERSION= downloads the release archive, verifies its checksum, compiles in a disposable workspace and installs inside the image, with bundled Lisp, helper programs and shared libraries. The result is tagged =emacs-builder-runtime:VERSION=; a rebuild moves the tag and may reuse cached layers. Keep the image you tested against: Ubuntu packages are not pinned, so a rebuild can differ.
+
+Each build writes its image ID and inputs to Git-ignored =.runtime/builds/DIGEST.txt=, where =DIGEST= is the image ID without =sha256:=. The image embeds the same metadata; stderr reports the image ID:
+
+#+begin_src sh
+./runtime exec 26.3 -- cat /usr/local/share/emacs-runtime/build-info
+#+end_src
+
+** Run a project
+
+=./runtime run VERSION [--directory DIR] [-- EMACS-ARGS...]= starts the image's Emacs in the project directory, mounted at =/work=. =./runtime exec VERSION [--directory DIR] -- COMMAND [ARGS...]= starts =COMMAND= there instead, found through the image's =PATH=. Both run under the conditions below.
+
+- Image :: The image currently tagged =emacs-builder-runtime:VERSION=; stderr reports its ID. Never builds or pulls; a missing image fails with the build command to run.
+- Project :: =DIR=, by default the current directory; a relative =DIR= resolves against it. Any directory, Git or not. Symlinks are resolved; stderr reports the physical host path.
+- Arguments :: Everything after =--= reaches Emacs unchanged; =run= may omit =--= when there are none. For =exec=, it is =COMMAND= and its arguments, also unchanged. Pass =-Q= to Emacs for compatibility checks.
+- Filesystem :: The image, the project and any mounts beneath it are read-only. =HOME= (=/home/runtime=) and =TMPDIR= (=/tmp=) are writable tmpfs, discarded on exit. No host configuration is mounted.
+- User :: The caller's UID and GID. Run as the project's owner with Docker access, not under =sudo=: a root caller runs as =65534:65534= (=nobody=), so the project must then be world-readable. Membership of the =docker= group is root-equivalent on the host. Rootless Docker maps container UIDs to subordinate host UIDs, so it also needs a world-readable project.
+- Network and privileges :: No network; all capabilities dropped; privilege escalation disabled.
+- Streams :: Stdin is forwarded. When stdin and stdout are both terminals, the container gets a terminal with the caller's =TERM=, =--batch= runs included, and stdout and stderr share it. Redirect or pipe output to keep them separate.
+- Exit status :: That of Emacs or =COMMAND=. =./runtime= errors also exit 1, as a failing ERT run does; they are the stderr lines prefixed =runtime:=. Docker's own failures exit 125 to 127, including a =COMMAND= that is not executable (126) or not found (127).
+
+** Test a package
+
+Run the package's ERT suite twice: from source, then from bytecode compiled by the runtime's Emacs. Older Emacs versions cannot generally run newer bytecode, so host-compiled =.elc= files prove nothing.
+
+- Load sources by absolute path. A =load-path= lookup, e.g. through =-L /work=, silently prefers any host-compiled =.elc= in the project.
+- Keep a newer Emacs source checkout's =lisp/= directories off =load-path=: its ERT and standard libraries would shadow the runtime's.
+- Networking is disabled, so dependencies cannot be installed. Place them under the project and add them to =load-path= in both passes; the examples assume none.
+
+#+begin_src sh
+# Source
+./runtime run 26.3 --directory ~/src/my-package -- -Q --batch \
+  -l /work/my-package.el -l /work/test/my-package-tests.el \
+  -f ert-run-tests-batch-and-exit
+#+end_src
+
+The project is read-only and each invocation starts a new container, so one =exec= runs two Emacs processes: the first compiles copies in =/tmp=, the second loads only the resulting bytecode and runs the suite. Compiling and testing in one process would hide code that works only because compilation ran it, e.g. definitions inside =eval-when-compile=.
+
+#+begin_src sh
+# Bytecode
+./runtime exec 26.3 --directory ~/src/my-package -- sh -c '
+  cp my-package.el test/my-package-tests.el /tmp &&
+  emacs -Q --batch -L /tmp -f batch-byte-compile /tmp/my-package.el /tmp/my-package-tests.el &&
+  emacs -Q --batch -L /tmp -l /tmp/my-package-tests.elc -f ert-run-tests-batch-and-exit'
+#+end_src
 
 * License
 
