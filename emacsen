@@ -62,6 +62,7 @@ read_recipe() {
     case ${recipe[source]-} in
         tarball) check_keys "$file" 'tarball recipe' recipe source url sha256 version builder ;;
         git) check_keys "$file" 'git recipe' recipe source url ref version builder ;;
+        path) check_keys "$file" 'path recipe' recipe source path version builder ;;
         '') fatal "recipe has no source: $file" ;;
         *) fatal "unknown source in $file: ${recipe[source]}" ;;
     esac
@@ -79,8 +80,20 @@ materialize_source() {
     case ${recipe[source]} in
         tarball) materialize_tarball "$scratch" ;;
         git) materialize_git "$scratch" ;;
+        path) materialize_path "$scratch" ;;
         *) fatal "not implemented: ${recipe[source]}" ;;
     esac
+}
+
+# Set source_info in the caller from common fields and extra KEY VALUE pairs.
+set_source_info() {
+    (( $# % 2 == 0 )) || fatal "source info requires key/value pairs"
+
+    printf -v source_info '%s: %s\n' \
+           source-kind "${recipe[source]}" \
+           source-sha256 "$source_sha256" \
+           "$@"
+    source_info=${source_info%$'\n'}
 }
 
 materialize_tarball() {
@@ -111,39 +124,9 @@ materialize_tarball() {
     fi
 
     cp -- "$cache" "$scratch/source/archive"
-    printf -v source_info \
-           'source-kind: tarball\nsource-sha256: %s\nsource-url: %s\ndownload-url: %s' \
-           "$source_sha256" "${recipe[url]}" "$download_url"
-}
-
-read_git_lock() {
-    local directory=$1 line lock_ref='' lock_commit=''
-    local hint="run: emacsen update ${directory##*/}"
-
-    [[ -n ${recipe[url]-} && -n ${recipe[ref]-} ]] \
-        || fatal "git recipe requires url and ref"
-    git check-ref-format "${recipe[ref]}" >/dev/null \
-        || fatal "git recipe requires a full ref name: ${recipe[ref]}"
-    [[ -f $directory/lock ]] \
-        || fatal "git recipe requires a lock; $hint"
-
-    while IFS= read -r line || [[ -n $line ]]; do
-        case $line in
-            ref=*)
-                [[ -z $lock_ref ]] || fatal "duplicate ref in git lock; $hint"
-                lock_ref=${line#ref=}
-                ;;
-            commit=*)
-                [[ -z $lock_commit ]] || fatal "duplicate commit in git lock; $hint"
-                lock_commit=${line#commit=}
-                ;;
-            *) fatal "invalid git lock; $hint" ;;
-        esac
-    done < "$directory/lock"
-
-    [[ $lock_ref == "${recipe[ref]}" && $lock_commit =~ ^[0-9a-f]{40}$ ]] \
-        || fatal "git lock does not match recipe or has an invalid commit; $hint"
-    source_commit=$lock_commit
+    set_source_info \
+        source-url "${recipe[url]}" \
+        download-url "$download_url"
 }
 
 materialize_git() {
@@ -163,9 +146,63 @@ materialize_git() {
 
     source_sha256=$(sha256sum -- "$scratch/source/archive")
     source_sha256=${source_sha256%% *}
-    printf -v source_info \
-           'source-kind: git\nsource-sha256: %s\nsource-url: %s\nsource-ref: %s\nsource-commit: %s' \
-           "$source_sha256" "${recipe[url]}" "${recipe[ref]}" "$source_commit"
+    set_source_info \
+        source-url "${recipe[url]}" \
+        source-ref "${recipe[ref]}" \
+        source-commit "$source_commit"
+}
+
+materialize_path() {
+    local scratch=$1 path source_root commit dirty=false status unmerged file
+
+    [[ -n ${recipe[path]-} && ${recipe[path]} != /* ]] \
+        || fatal "path recipe requires a path relative to the repository root"
+
+    path="$root/${recipe[path]}"
+    [[ -d $path ]] \
+        || fatal "source path is missing: $path; run: git submodule update --init"
+
+    path=$(CDPATH='' cd -- "$path" && pwd -P) \
+        || fatal "cannot resolve source path: $path"
+    # A deinitialised submodule leaves an empty directory inside the parent work tree.
+    [[ -n $(find "$path" -mindepth 1 -maxdepth 1 -print -quit) ]] \
+        || fatal "source path is empty: $path; run: git submodule update --init"
+
+    [[ -d $path/.git || -f $path/.git ]] \
+        || fatal "source path is not a Git worktree root: $path"
+    source_root=$(git -C "$path" rev-parse --show-toplevel 2>/dev/null) \
+        || fatal "cannot read source Git worktree: $path"
+    [[ $source_root == "$path" ]] \
+        || fatal "source path is not a Git worktree root: $path"
+    commit=$(git -C "$path" rev-parse --verify 'HEAD^{commit}' 2>/dev/null) \
+        || fatal "source worktree has no valid HEAD commit: $path"
+
+    unmerged=$(git -C "$path" ls-files --unmerged) \
+        || fatal "cannot read source worktree index: $path"
+    [[ -z $unmerged ]] \
+        || fatal "source worktree has unresolved conflicts: $path; resolve them before building"
+    status=$(git -C "$path" status --porcelain --untracked-files=all) \
+        || fatal "cannot read source worktree status: $path"
+    if [[ -n $status ]]; then dirty=true; fi
+
+    git -C "$path" ls-files -z --cached --others --exclude-standard > "$scratch/source-files" \
+        || fatal "cannot list source worktree files: $path"
+    while IFS= read -r -d '' file; do
+        [[ -e $path/$file || -L $path/$file ]] \
+            || fatal "source worktree file is missing: $path/$file; restore it or stage its removal"
+        [[ -f $path/$file || -L $path/$file ]] \
+            || fatal "source worktree entry is not a file or symlink: $path/$file"
+    done < "$scratch/source-files"
+    tar -C "$path" --null -T "$scratch/source-files" --transform 's,^,emacs/,S' \
+        -cf "$scratch/source/archive" \
+        || fatal "cannot archive source worktree: $path"
+
+    source_sha256=$(sha256sum -- "$scratch/source/archive")
+    source_sha256=${source_sha256%% *}
+    set_source_info \
+        source-path "$path" \
+        source-commit "$commit" \
+        source-dirty "$dirty"
 }
 
 update_source() (
@@ -207,6 +244,36 @@ update_source() (
     mv -- "$scratch" "$directory/lock"
     printf 'emacsen: %s %s -> %s\n' "$name" "$old_commit" "$commit" >&2
 )
+
+read_git_lock() {
+    local directory=$1 line lock_ref='' lock_commit=''
+    local hint="run: emacsen update ${directory##*/}"
+
+    [[ -n ${recipe[url]-} && -n ${recipe[ref]-} ]] \
+        || fatal "git recipe requires url and ref"
+    git check-ref-format "${recipe[ref]}" >/dev/null \
+        || fatal "git recipe requires a full ref name: ${recipe[ref]}"
+    [[ -f $directory/lock ]] \
+        || fatal "git recipe requires a lock; $hint"
+
+    while IFS= read -r line || [[ -n $line ]]; do
+        case $line in
+            ref=*)
+                [[ -z $lock_ref ]] || fatal "duplicate ref in git lock; $hint"
+                lock_ref=${line#ref=}
+                ;;
+            commit=*)
+                [[ -z $lock_commit ]] || fatal "duplicate commit in git lock; $hint"
+                lock_commit=${line#commit=}
+                ;;
+            *) fatal "invalid git lock; $hint" ;;
+        esac
+    done < "$directory/lock"
+
+    [[ $lock_ref == "${recipe[ref]}" && $lock_commit =~ ^[0-9a-f]{40}$ ]] \
+        || fatal "git lock does not match recipe or has an invalid commit; $hint"
+    source_commit=$lock_commit
+}
 
 build_image() (
     local name=$1
