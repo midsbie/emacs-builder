@@ -9,15 +9,17 @@ fatal() {
 
 usage() {
     cat <<'EOF'
-Usage: emacsen build NAME
+Usage: emacsen build NAME [--variant x|server]
        emacsen run NAME [--directory DIR] [-- EMACS-ARGS...]
        emacsen exec NAME [--directory DIR] -- COMMAND [ARGS...]
+       emacsen update NAME
        emacsen --help
 
 Build a retained Docker image from a source recipe.  Run that local image's
 Emacs, or COMMAND for exec, with DIR (default: current directory) read-only at
 /work.  When attached to a terminal, provide a terminal inside the container.
 Run and exec never build or pull an image. Arguments are passed unchanged.
+Update locks a Git recipe's ref to a commit; builds use that lock unchanged.
 EOF
 }
 
@@ -52,6 +54,7 @@ materialize_source() {
 
     case ${recipe[source]} in
         tarball) materialize_tarball "$scratch" ;;
+        git) materialize_git "$scratch" ;;
         *) fatal "not implemented: ${recipe[source]}" ;;
     esac
 }
@@ -89,23 +92,158 @@ materialize_tarball() {
            "$source_sha256" "${recipe[url]}" "$download_url"
 }
 
+read_git_lock() {
+    local directory=$1 line lock_ref='' lock_commit=''
+    local hint="run: emacsen update ${directory##*/}"
+
+    [[ -n ${recipe[url]-} && -n ${recipe[ref]-} ]] \
+        || fatal "git recipe requires url and ref"
+    git check-ref-format "${recipe[ref]}" >/dev/null \
+        || fatal "git recipe requires a full ref name: ${recipe[ref]}"
+    [[ -f $directory/lock ]] \
+        || fatal "git recipe requires a lock; $hint"
+
+    while IFS= read -r line || [[ -n $line ]]; do
+        case $line in
+            ref=*)
+                [[ -z $lock_ref ]] || fatal "duplicate ref in git lock; $hint"
+                lock_ref=${line#ref=}
+                ;;
+            commit=*)
+                [[ -z $lock_commit ]] || fatal "duplicate commit in git lock; $hint"
+                lock_commit=${line#commit=}
+                ;;
+            *) fatal "invalid git lock; $hint" ;;
+        esac
+    done < "$directory/lock"
+
+    [[ $lock_ref == "${recipe[ref]}" && $lock_commit =~ ^[0-9a-f]{40}$ ]] \
+        || fatal "git lock does not match recipe or has an invalid commit; $hint"
+    source_commit=$lock_commit
+}
+
+materialize_git() {
+    local scratch=$1 mirror="$root/.emacsen/sources/emacs.git"
+
+    if [[ ! -d $mirror ]]; then
+        git init --bare "$mirror" >&2
+    fi
+    if ! git -C "$mirror" cat-file -e "$source_commit^{commit}" 2>/dev/null; then
+        git -C "$mirror" fetch --depth 1 --no-tags "${recipe[url]}" "$source_commit" >&2
+    fi
+
+    # Keep cached commits reachable without following a moving upstream ref.
+    git -C "$mirror" update-ref "refs/emacsen/$source_commit" "$source_commit"
+    git -C "$mirror" archive --format=tar --prefix=emacs/ "$source_commit" \
+        > "$scratch/source/archive"
+
+    source_sha256=$(sha256sum -- "$scratch/source/archive")
+    source_sha256=${source_sha256%% *}
+    printf -v source_info \
+           'source-kind: git\nsource-sha256: %s\nsource-url: %s\nsource-ref: %s\nsource-commit: %s' \
+           "$source_sha256" "${recipe[url]}" "${recipe[ref]}" "$source_commit"
+}
+
+update_source() (
+    local name=$1 directory="$root/recipes/$1"
+    local remote commit ref extra line old_commit=none contents scratch
+
+    read_recipe "$directory"
+    [[ ${recipe[source]-} == git ]] \
+        || fatal "nothing to lock for recipe: $name"
+    [[ -n ${recipe[url]-} && -n ${recipe[ref]-} ]] \
+        || fatal "git recipe requires url and ref"
+    git check-ref-format "${recipe[ref]}" >/dev/null \
+        || fatal "git recipe requires a full ref name: ${recipe[ref]}"
+
+    remote=$(git ls-remote --exit-code "${recipe[url]}" "${recipe[ref]}") \
+        || fatal "cannot resolve git ref: ${recipe[ref]}"
+    [[ $remote != *$'\n'* ]] \
+        || fatal "git ref must resolve to exactly one commit"
+
+    read -r commit ref extra <<< "$remote"
+    [[ $commit =~ ^[0-9a-f]{40}$ && $ref == "${recipe[ref]}" && -z $extra ]] \
+        || fatal "git ref must resolve to exactly one commit"
+
+    printf -v contents 'ref=%s\ncommit=%s' "$ref" "$commit"
+    if [[ -f $directory/lock ]]; then
+        if [[ $(<"$directory/lock") == "$contents" ]]; then
+            printf 'emacsen: %s unchanged (%s)\n' "$name" "$commit" >&2
+            return
+        fi
+
+        while IFS= read -r line || [[ -n $line ]]; do
+            if [[ $line == commit=* ]]; then old_commit=${line#commit=}; fi
+        done < "$directory/lock"
+    fi
+
+    scratch=$(mktemp "$directory/.lock-XXXXXXXX")
+    trap 'rm -f -- "$scratch"' EXIT
+    printf '%s\n' "$contents" > "$scratch"
+    mv -- "$scratch" "$directory/lock"
+    printf 'emacsen: %s %s -> %s\n' "$name" "$old_commit" "$commit" >&2
+)
+
 build_image() (
     local name=$1
+    shift
+
     local directory="$root/recipes/$name"
     local tag="emacsen:$name"
-    local revision source_status dirty=false source_sha256 source_info
-    local inputs scratch container='' image_id record
+    local revision source_status dirty=false source_sha256 source_info source_commit
+    local inputs scratch container='' image_id record builder builder_directory variants
+    local variant='' variant_seen=false
+    local variant_options=() builder_paths=("recipes/$name") declared_variants=()
     local cleanup_status=0
+
+    while (( $# )); do
+        case $1 in
+            --variant)
+                [[ $variant_seen == false ]] || fatal "--variant may be specified only once"
+                [[ $# -ge 2 && -n $2 && $2 != --* ]] || fatal "--variant requires x or server"
+                variant=$2
+                variant_seen=true
+                shift 2
+                ;;
+            *) fatal "expected --variant x|server, got: $1" ;;
+        esac
+    done
 
     read_recipe "$directory"
     [[ -n ${recipe[source]-} ]] \
         || fatal "recipe has no source: $directory/recipe"
-    [[ -z ${recipe[builder]-} || ${recipe[builder]} == "$name" ]] \
-        || fatal "builder indirection is not implemented in this slice"
-    [[ -f $directory/Dockerfile && -f $directory/build.sh ]] \
-        || fatal "builder requires Dockerfile and build.sh: $name"
 
-    for command in docker git sha256sum find sort xargs mktemp curl; do
+    builder=${recipe[builder]:-$name}
+    [[ $builder =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
+        || fatal "invalid builder name: $builder"
+
+    builder_directory="$root/recipes/$builder"
+    [[ -f $builder_directory/recipe && \
+           -f $builder_directory/Dockerfile && -f $builder_directory/build.sh ]] \
+        || fatal "builder requires recipe, Dockerfile and build.sh: $builder"
+
+    variants=$(read_recipe "$builder_directory"; printf '%s' "${recipe[variants]-}")
+    if [[ -n $variants ]]; then
+        read -r -a declared_variants <<< "$variants"
+        if [[ $variant_seen == false ]]; then
+            if dpkg -s libx11-6 >/dev/null 2>&1; then variant=x; else variant=server; fi
+        fi
+
+        local supported=false declared
+        for declared in "${declared_variants[@]}"; do
+            if [[ $variant == "$declared" ]]; then supported=true; fi
+        done
+        [[ $supported == true ]] \
+            || fatal "unsupported variant for $builder: $variant (expected $variants)"
+        variant_options=(--build-arg "VARIANT=$variant")
+    elif [[ $variant_seen == true ]]; then
+        fatal "builder $builder declares no variants"
+    fi
+
+    if [[ ${recipe[source]} == git ]]; then read_git_lock "$directory"; fi
+    if [[ $builder != "$name" ]]; then builder_paths+=("recipes/$builder"); fi
+
+    for command in docker git sha256sum find sort xargs mktemp curl tar; do
         command -v "$command" >/dev/null || fatal "required command not found: $command"
     done
 
@@ -113,13 +251,13 @@ build_image() (
         || fatal "build requires a Git checkout of emacs-builder"
     source_status=$(
         git -C "$root" status --porcelain --untracked-files=all -- \
-            emacsen "recipes/$name"
+            emacsen "${builder_paths[@]}"
     )
-    if [[ -n $source_status ]]; then dirty=true fi
+    if [[ -n $source_status ]]; then dirty=true; fi
     inputs=$(
         cd -- "$root"
         sha256sum -- emacsen
-        find "recipes/$name" -type f -print0 | sort -z | xargs -0 sha256sum --
+        find "${builder_paths[@]}" -type f -print0 | sort -z | xargs -0 sha256sum --
     )
 
     docker info >/dev/null \
@@ -145,11 +283,12 @@ build_image() (
         --build-context "source=$scratch/source" \
         --build-arg "SOURCE_SHA256=$source_sha256" \
         --build-arg "EMACS_VERSION=${recipe[version]-}" \
+        "${variant_options[@]}" \
         --build-arg "BUILDER_REVISION=$revision" \
         --build-arg "BUILDER_DIRTY=$dirty" \
         --build-arg "BUILDER_INPUTS=$inputs" \
         --build-arg "SOURCE_INFO=$source_info" \
-        "$directory" >&2
+        "$builder_directory" >&2
 
     image_id=$(<"$scratch/image-id")
     container=$(docker create --pull=never --network=none --read-only --entrypoint /bin/true \
@@ -245,7 +384,10 @@ case ${1-} in
         exit 0
         ;;
     build)
-        [[ $# -eq 2 ]] || fatal "usage: emacsen build NAME"
+        [[ $# -ge 2 ]] || fatal "usage: emacsen build NAME [--variant x|server]"
+        ;;
+    update)
+        [[ $# -eq 2 ]] || fatal "usage: emacsen update NAME"
         ;;
     run)
         [[ $# -ge 2 ]] || fatal "usage: emacsen run NAME [--directory DIR] [-- EMACS-ARGS...]"
@@ -265,6 +407,7 @@ name=$2
 action=$1
 shift 2
 case $action in
-    build) build_image "$name" ;;
+    build) build_image "$name" "$@" ;;
+    update) update_source "$name" ;;
     run|exec) run_image "$action" "$name" "$@" ;;
 esac
