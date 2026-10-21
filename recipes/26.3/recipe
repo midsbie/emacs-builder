@@ -3,3 +3,4 @@ url=https://ftpmirror.gnu.org/emacs/emacs-26.3.tar.xz
 # Verified against GNU's release signature, key D405AA2C862C54F17EEE6BE0E8BCD7866AFCF978.
 sha256=4d90e6751ad8967822c6e092db07466b9d383ef1653feb2f95c93e7de66d3485
 version=26.3
+builder=26.3

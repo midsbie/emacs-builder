@@ -65,6 +65,9 @@ read_recipe() {
         '') fatal "recipe has no source: $file" ;;
         *) fatal "unknown source in $file: ${recipe[source]}" ;;
     esac
+
+    [[ ${recipe[builder]-} =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
+        || fatal "recipe requires a valid builder name: $file"
 }
 
 # Set source_sha256 and source_info in the caller and put the recipe's source in SCRATCH/source.
@@ -214,7 +217,7 @@ build_image() (
     local revision source_status dirty=false source_sha256 source_info source_commit
     local inputs scratch container='' image_id record builder builder_directory variants
     local variant='' variant_seen=false
-    local variant_options=() builder_paths=("recipes/$name") declared_variants=()
+    local variant_options=() builder_paths=() declared_variants=()
     local -A builder_metadata=()
     local cleanup_status=0
 
@@ -233,24 +236,16 @@ build_image() (
 
     read_recipe "$directory"
 
-    builder=${recipe[builder]:-$name}
-    [[ $builder =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
-        || fatal "invalid builder name: $builder"
+    builder=${recipe[builder]}
+    builder_directory="$root/builders/$builder"
+    builder_paths=("recipes/$name" "builders/$builder")
+    [[ -f $builder_directory/builder && -f $builder_directory/Dockerfile
+       && -f $builder_directory/build.sh ]] \
+        || fatal "builder requires builder, Dockerfile and build.sh: $builder_directory"
 
-    builder_directory=$directory
-    if [[ -n ${recipe[builder]-} ]]; then
-        builder_directory="$root/builders/$builder"
-        [[ -f $builder_directory/builder ]] \
-            || fatal "builder metadata not found: $builder_directory/builder"
-        builder_paths+=("builders/$builder")
-    fi
-    [[ -f $builder_directory/Dockerfile && -f $builder_directory/build.sh ]] \
-        || fatal "builder requires Dockerfile and build.sh: $builder"
+    read_metadata "$builder_directory/builder" builder builder_metadata
+    check_keys "$builder_directory/builder" builder builder_metadata variants
 
-    if [[ -f $builder_directory/builder ]]; then
-        read_metadata "$builder_directory/builder" builder builder_metadata
-        check_keys "$builder_directory/builder" builder builder_metadata variants
-    fi
     variants=${builder_metadata[variants]-}
     if [[ -n $variants ]]; then
         read -r -a declared_variants <<< "$variants"
