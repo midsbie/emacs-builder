@@ -9,11 +9,12 @@ fatal() {
 usage() {
     cat <<'EOF'
 Usage: runtime build VERSION
-       runtime run VERSION [--directory DIR] -- EMACS-ARGS...
+       runtime run VERSION [--directory DIR] [-- EMACS-ARGS...]
        runtime --help
 
 Build a retained Docker image from a version recipe.
 Run that local image with DIR (default: current directory) read-only at /work.
+With no Emacs arguments, open terminal Emacs when attached to a terminal.
 Run never builds or pulls an image. Emacs arguments are passed unchanged.
 EOF
 }
@@ -85,9 +86,10 @@ build_image() (
 run_image() {
     local version=$1
     shift
-    local directory=. directory_seen=false delimiter_seen=false
+    local directory=. directory_seen=false
     local project mount_source image_id uid gid
     local tag="emacs-builder-runtime:$version"
+    local terminal_options=()
 
     while (( $# )); do
         case $1 in
@@ -99,7 +101,6 @@ run_image() {
                 shift 2
                 ;;
             --)
-                delimiter_seen=true
                 shift
                 break
                 ;;
@@ -108,9 +109,6 @@ run_image() {
                 ;;
         esac
     done
-
-    [[ $delimiter_seen == true ]] \
-      || fatal "usage: runtime run VERSION [--directory DIR] -- EMACS-ARGS..."
 
     # The suffix preserves directory names ending in newlines through substitution.
     project=$(CDPATH='' cd -P -- "$directory" 2>/dev/null && printf '%s/.' "$PWD") \
@@ -132,11 +130,16 @@ run_image() {
         gid=65534               # "nogroup"
     fi
 
+    if [[ $# -eq 0 && -t 0 && -t 1 ]]; then
+        terminal_options=(--tty --env "TERM=${TERM:-xterm}")
+    fi
+
     # Quote Docker's CSV field; /. also protects trailing path whitespace.
     mount_source=${project//\"/\"\"}/.
     printf 'runtime: image %s (%s)\nruntime: mounting %s at /work (read-only)\n' \
         "$tag" "$image_id" "$project" >&2
     exec docker run --rm --pull=never --interactive \
+        "${terminal_options[@]}" \
         --network=none --read-only --cap-drop=ALL --security-opt=no-new-privileges \
         --user "$uid:$gid" --workdir /work \
         --env HOME=/home/runtime --env TMPDIR=/tmp --env LANG=C.UTF-8 \
@@ -156,7 +159,7 @@ case ${1-} in
         [[ $# -eq 2 ]] || fatal "usage: runtime build VERSION"
         ;;
     run)
-        [[ $# -ge 3 ]] || fatal "usage: runtime run VERSION [--directory DIR] -- EMACS-ARGS..."
+        [[ $# -ge 2 ]] || fatal "usage: runtime run VERSION [--directory DIR] [-- EMACS-ARGS...]"
         ;;
     *)
         usage >&2
