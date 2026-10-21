@@ -1,0 +1,4 @@
+source=git
+url=https://github.com/emacs-mirror/emacs.git
+ref=refs/heads/master
+builder=ubuntu-26.04

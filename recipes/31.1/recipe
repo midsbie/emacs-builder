@@ -1,0 +1,6 @@
+source=tarball
+url=https://ftp.gnu.org/gnu/emacs/emacs-31.1.tar.xz
+# GNU release signature: Sean Whitton, key 9B917007AE030E36E4FC248B695B7AE4BF066240.
+sha256=1da5790d9580c81932b5bf700633114468da7b3412d69faa767daebf974f4586
+version=31.1
+builder=ubuntu-26.04
