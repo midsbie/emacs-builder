@@ -10,12 +10,14 @@ usage() {
     cat <<'EOF'
 Usage: runtime build VERSION
        runtime run VERSION [--directory DIR] [-- EMACS-ARGS...]
+       runtime exec VERSION [--directory DIR] -- COMMAND [ARGS...]
        runtime --help
 
 Build a retained Docker image from a version recipe.
-Run that local image with DIR (default: current directory) read-only at /work.
+Run that local image's Emacs, or COMMAND for exec, with DIR
+(default: current directory) read-only at /work.
 When attached to a terminal, provide a terminal inside the container.
-Run never builds or pulls an image. Emacs arguments are passed unchanged.
+Run and exec never build or pull an image. Arguments are passed unchanged.
 EOF
 }
 
@@ -84,12 +86,12 @@ build_image() (
 )
 
 run_image() {
-    local version=$1
-    shift
+    local action=$1 version=$2
+    shift 2
     local directory=. directory_seen=false
     local project mount_source image_id uid gid
     local tag="emacs-builder-runtime:$version"
-    local terminal_options=()
+    local terminal_options=() entrypoint_options=()
 
     while (( $# )); do
         case $1 in
@@ -105,10 +107,16 @@ run_image() {
                 break
                 ;;
             *)
-                fatal "expected --directory DIR or -- before Emacs arguments"
+                fatal "expected --directory DIR or --, got: $1"
                 ;;
         esac
     done
+
+    if [[ $action == exec ]]; then
+        [[ $# -ge 1 && -n $1 ]] || fatal "exec requires COMMAND after --"
+        entrypoint_options=(--entrypoint "$1")
+        shift
+    fi
 
     # The suffix preserves directory names ending in newlines through substitution.
     project=$(CDPATH='' cd -P -- "$directory" 2>/dev/null && printf '%s/.' "$PWD") \
@@ -146,6 +154,7 @@ run_image() {
         --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
         --tmpfs "/home/runtime:rw,nosuid,nodev,mode=700,uid=$uid,gid=$gid" \
         --mount "type=bind,\"source=$mount_source\",target=/work,readonly,bind-propagation=rprivate,bind-recursive=readonly" \
+        "${entrypoint_options[@]}" \
         "$image_id" "$@"
 }
 
@@ -161,6 +170,9 @@ case ${1-} in
     run)
         [[ $# -ge 2 ]] || fatal "usage: runtime run VERSION [--directory DIR] [-- EMACS-ARGS...]"
         ;;
+    exec)
+        [[ $# -ge 2 ]] || fatal "usage: runtime exec VERSION [--directory DIR] -- COMMAND [ARGS...]"
+        ;;
     *)
         usage >&2
         exit 1
@@ -175,5 +187,5 @@ action=$1
 shift 2
 case $action in
     build) build_image "$version" ;;
-    run) run_image "$version" "$@" ;;
+    run|exec) run_image "$action" "$version" "$@" ;;
 esac
