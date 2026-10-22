@@ -117,7 +117,7 @@ Versions coexist in Emacs's version-named directories. The last install owns the
 - Image :: The image tagged =emacsen:NAME=; stderr reports its ID. Never built or pulled; a missing image fails with the build command to run.
 - Project :: =DIR=, default the current directory, mounted at =/work=. Relative paths resolve against the current directory; symlinks resolve to the physical path, reported on stderr.
 - Arguments :: Everything after =--= passes unchanged. =run= may omit =--= when there are no Emacs arguments; =exec= requires =COMMAND= after it. Pass =-Q= for compatibility checks.
-- Filesystem :: Image, project and mounts beneath it are read-only. =HOME= (=/home/runtime=) and =TMPDIR= (=/tmp=) are tmpfs, discarded on exit. No host configuration is mounted.
+- Filesystem :: Image, project and mounts beneath it are read-only. =HOME= (=/home/runtime=) and =TMPDIR= (=/tmp=) are tmpfs, discarded on exit, and allow execution for native compilation. No host configuration is mounted.
 - User :: The caller's UID and GID. A root caller runs as =65534:65534= (=nobody=), which needs a world-readable project, as does rootless Docker's UID mapping.
 - Isolation :: No network, all capabilities dropped, privilege escalation disabled.
 - Streams :: Stdin is forwarded. When stdin and stdout are terminals, the container gets one with the caller's =TERM=, =--batch= included, and stdout and stderr share it; redirect or pipe to separate them.

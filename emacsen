@@ -529,13 +529,15 @@ run_image() {
     mount_source=${project//\"/\"\"}/.
     printf 'emacsen: image %s (%s)\nemacsen: mounting %s at /work (read-only)\n' \
         "$tag" "$image_id" "$project" >&2
+    # Docker mounts tmpfs noexec by default; native compilation loads the shared objects it
+    # writes to TMPDIR and to the eln cache under HOME.
     exec docker run --rm --pull=never --interactive \
         "${terminal_options[@]}" \
         --network=none --read-only --cap-drop=ALL --security-opt=no-new-privileges \
         --user "$uid:$gid" --workdir /work \
         --env HOME=/home/runtime --env TMPDIR=/tmp --env LANG=C.UTF-8 \
-        --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
-        --tmpfs "/home/runtime:rw,nosuid,nodev,mode=700,uid=$uid,gid=$gid" \
+        --tmpfs /tmp:rw,exec,nosuid,nodev,mode=1777 \
+        --tmpfs "/home/runtime:rw,exec,nosuid,nodev,mode=700,uid=$uid,gid=$gid" \
         --mount "type=bind,\"source=$mount_source\",target=/work,readonly,bind-propagation=rprivate,bind-recursive=readonly" \
         "${entrypoint_options[@]}" \
         "$image_id" "$@"
