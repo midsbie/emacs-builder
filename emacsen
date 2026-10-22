@@ -136,7 +136,16 @@ materialize_tarball() {
 }
 
 materialize_git() {
-    local scratch=$1 mirror="$root/.emacsen/sources/emacs.git" bare type
+    local scratch=$1 mirror="$root/.emacsen/sources/emacs.git" bare type lock
+
+    mkdir -p -- "${mirror%/*}" \
+        || fatal "cannot create source Git cache directory: ${mirror%/*}"
+    exec {lock}>> "$mirror.lock" \
+        || fatal "cannot open source Git cache lock: $mirror.lock"
+    if ! flock --nonblock "$lock"; then
+        printf 'emacsen: waiting for source Git cache %s\n' "$mirror" >&2
+        flock "$lock" || fatal "cannot lock source Git cache: $mirror.lock"
+    fi
 
     if [[ ! -e $mirror && ! -L $mirror ]]; then
         git init --bare "$mirror" >&2 \
@@ -151,7 +160,10 @@ materialize_git() {
         || fatal "source Git cache is not a bare repository: $mirror"
 
     if ! git --git-dir="$mirror" cat-file -e "$source_commit" 2>/dev/null; then
-        git --git-dir="$mirror" fetch --depth 1 --no-tags -- "${recipe[url]}" "$source_commit" >&2 \
+        # Detached auto-maintenance would inherit the lock and hold it past release. Older Git reads
+        # only gc.autoDetach, and maintenance.autoDetach overrides it where both exist.
+        git -c maintenance.autoDetach=false -c gc.autoDetach=false --git-dir="$mirror" \
+            fetch --depth 1 --no-tags -- "${recipe[url]}" "$source_commit" >&2 \
             || fatal "cannot fetch locked source commit $source_commit from ${recipe[url]}"
     fi
 
@@ -163,6 +175,8 @@ materialize_git() {
     # Keep cached commits reachable without following a moving upstream ref.
     git --git-dir="$mirror" update-ref "refs/emacsen/$source_commit" "$source_commit" \
         || fatal "cannot retain locked source commit $source_commit in cache: $mirror"
+    exec {lock}>&-
+
     git --git-dir="$mirror" archive --format=tar --prefix=emacs/ "$source_commit" \
         > "$scratch/source/archive" \
         || fatal "cannot archive locked source commit $source_commit from cache: $mirror"
@@ -326,7 +340,7 @@ build_image() (
 
     if [[ ${recipe[source]} == git ]]; then read_git_lock "$directory"; fi
 
-    for command in docker git sha256sum find sort xargs mktemp curl; do
+    for command in docker git sha256sum find sort xargs mktemp curl flock; do
         command -v "$command" >/dev/null || fatal "required command not found: $command"
     done
 

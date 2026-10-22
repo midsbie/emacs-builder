@@ -5,7 +5,7 @@ Build Emacs recipes into Docker images. Install an image's Emacs on the host, or
 * Requirements
 
 - Modern Linux, Docker Engine 25+ with BuildKit, access to the daemon.
-- Bash 5, Git, curl, GNU coreutils and findutils.
+- Bash 5, Git, curl, GNU coreutils and findutils, util-linux =flock=.
 - =install=: a rootful daemon and an image whose distribution and release match the host. =docker= group membership is root-equivalent.
 
 #+begin_src sh
@@ -56,6 +56,8 @@ Local Git sources accept absolute paths or =file://= URLs; no push is required. 
 #+end_src
 
 Only the locked commit enters the build. Keep it available for rebuilds with an empty source cache.
+
+Concurrent Git builds serialize cache writes on =.emacsen/sources/emacs.git.lock=, then export their retained commits independently.
 
 =emacs/= is an upstream submodule for analysis; builds do not require it.
 
