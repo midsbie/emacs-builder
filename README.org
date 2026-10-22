@@ -24,7 +24,7 @@ cd emacsen
 | 31.1   | GNU release tarball | ubuntu-26.04 | Ubuntu 26.04      |
 | master | Locked Git commit   | ubuntu-26.04 | Ubuntu 26.04      |
 
-Recipe and builder metadata: =key=value= lines and =#= comments, no quoting or expansion. Duplicate, unknown and misplaced keys are refused.
+Recipe, builder and lock metadata: =key=value= lines and =#= comments, no quoting or expansion. Keys are lowercase letters, digits and hyphens, starting with a letter. Duplicate, unknown and misplaced keys are refused.
 
 - Recipe :: =source= and =builder= required; =version= optional, checked against the built Emacs. Source keys by kind:
 - =tarball= :: =url=, =sha256=. Downloads are verified and cached at =.emacsen/sources/tarballs/SHA256=.

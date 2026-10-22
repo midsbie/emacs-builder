@@ -30,21 +30,24 @@ declare -A recipe=()
 # The only image prefix install accepts. Install mounts its target there and uses it as the default
 # target, since an installed Emacs runs only from its prefix. emacsen-install.sh assumes it.
 readonly install_prefix=/usr/local
+# Metadata and build-info keys. They become associative-array subscripts, so they admit no
+# character Bash expands.
+readonly key_pattern='[a-z][a-z0-9-]*'
 
 read_metadata() {
-    local file=$1 kind=$2 line key value
+    local file=$1 kind=$2 line key
     local -n fields=$3
 
     fields=()
 
     while IFS= read -r line || [[ -n $line ]]; do
         [[ -z $line || $line == \#* ]] && continue
-        [[ $line == *=* ]] || fatal "invalid $kind line in $file: $line"
+        [[ $line =~ ^($key_pattern)=(.*)$ ]] || fatal "invalid $kind line in $file: $line"
 
-        key=${line%%=*}
-        value=${line#*=}
-        [[ ! -v fields[$key] ]] || fatal "duplicate $kind key in $file: $key"
-        fields["$key"]=$value
+        key=${BASH_REMATCH[1]}
+        # Quoted, so that Bash 5.0 and 5.1 expand the subscript once, as later versions do.
+        [[ ! -v 'fields[$key]' ]] || fatal "duplicate $kind key in $file: $key"
+        fields["$key"]=${BASH_REMATCH[2]}
     done < "$file"
 }
 
@@ -57,7 +60,7 @@ check_keys() {
 
     for key; do allowed[$key]=1; done
     for key in "${!metadata[@]}"; do
-        [[ -v allowed[$key] ]] || fatal "unknown $kind key in $file: $key"
+        [[ -v 'allowed[$key]' ]] || fatal "unknown $kind key in $file: $key"
     done
 }
 
@@ -173,7 +176,7 @@ materialize_git() {
 
 update_source() (
     local name=$1 directory="$root/recipes/$1"
-    local remote commit remote_ref extra line old_commit=none contents scratch
+    local remote remote_commit remote_ref extra line old_commit=none contents scratch
 
     read_recipe "$directory"
     [[ ${recipe[source]-} == git ]] \
@@ -189,14 +192,14 @@ update_source() (
         || fatal "git ref must resolve to exactly one commit"
 
     # Split $remote into named variables
-    read -r commit remote_ref extra <<< "$remote"
-    [[ $commit =~ ^[0-9a-f]{40}$ && $remote_ref == "${recipe[ref]}" && -z $extra ]] \
+    read -r remote_commit remote_ref extra <<< "$remote"
+    [[ $remote_commit =~ ^[0-9a-f]{40}$ && $remote_ref == "${recipe[ref]}" && -z $extra ]] \
         || fatal "git ref must resolve to exactly one commit"
 
-    printf -v contents 'ref=%s\ncommit=%s' "$remote_ref" "$commit"
+    printf -v contents 'ref=%s\ncommit=%s' "$remote_ref" "$remote_commit"
     if [[ -f $directory/lock ]]; then
         if [[ $(<"$directory/lock") == "$contents" ]]; then
-            printf 'emacsen: %s unchanged (%s)\n' "$name" "$commit" >&2
+            printf 'emacsen: %s unchanged (%s)\n' "$name" "$remote_commit" >&2
             return
         fi
 
@@ -209,37 +212,27 @@ update_source() (
     trap 'rm -f -- "$scratch"' EXIT
     printf '%s\n' "$contents" > "$scratch"
     mv -- "$scratch" "$directory/lock"
-    printf 'emacsen: %s %s -> %s\n' "$name" "$old_commit" "$commit" >&2
+    printf 'emacsen: %s %s -> %s\n' "$name" "$old_commit" "$remote_commit" >&2
 )
 
 read_git_lock() {
-    local directory=$1 line lock_ref='' lock_commit=''
+    local directory=$1 file=$1/lock
     local hint="run: emacsen update ${directory##*/}"
+    local -A lock=()
 
     [[ -n ${recipe[url]-} && -n ${recipe[ref]-} ]] \
         || fatal "git recipe requires url and ref"
     git check-ref-format "${recipe[ref]}" >/dev/null \
         || fatal "git recipe requires a full ref name: ${recipe[ref]}"
-    [[ -f $directory/lock ]] \
+    [[ -f $file ]] \
         || fatal "git recipe requires a lock; $hint"
 
-    while IFS= read -r line || [[ -n $line ]]; do
-        case $line in
-            ref=*)
-                [[ -z $lock_ref ]] || fatal "duplicate ref in git lock; $hint"
-                lock_ref=${line#ref=}
-                ;;
-            commit=*)
-                [[ -z $lock_commit ]] || fatal "duplicate commit in git lock; $hint"
-                lock_commit=${line#commit=}
-                ;;
-            *) fatal "invalid git lock; $hint" ;;
-        esac
-    done < "$directory/lock"
+    read_metadata "$file" 'git lock' lock
+    check_keys "$file" 'git lock' lock ref commit
 
-    [[ $lock_ref == "${recipe[ref]}" && $lock_commit =~ ^[0-9a-f]{40}$ ]] \
+    [[ ${lock[ref]-} == "${recipe[ref]}" && ${lock[commit]-} =~ ^[0-9a-f]{40}$ ]] \
         || fatal "git lock does not match recipe or has an invalid commit; $hint"
-    source_commit=$lock_commit
+    source_commit=${lock[commit]}
 }
 
 image_file() (
@@ -386,12 +379,12 @@ check_installable() {
         [[ $line == \[* ]] && break
         [[ -z $line ]] && continue
 
-        [[ $line == *': '* && -n ${line%%: *} ]] \
-            || fatal "invalid build-info header: $file"
+        [[ $line =~ ^($key_pattern)': '(.*)$ ]] \
+            || fatal "invalid build-info header line in $file: $line"
 
-        key=${line%%: *}
-        [[ ! -v info[$key] ]] || fatal "duplicate build-info field: $key"
-        info["$key"]=${line#*: }
+        key=${BASH_REMATCH[1]}
+        [[ ! -v 'info[$key]' ]] || fatal "duplicate build-info field in $file: $key"
+        info["$key"]=${BASH_REMATCH[2]}
     done < "$file"
 
     [[ -n ${info[build-tree]-} ]] \
