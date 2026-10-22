@@ -137,7 +137,7 @@ materialize_tarball() {
 }
 
 materialize_git() {
-    local scratch=$1 mirror="$root/.emacsen/sources/emacs.git" bare
+    local scratch=$1 mirror="$root/.emacsen/sources/emacs.git" bare type
 
     if [[ ! -e $mirror && ! -L $mirror ]]; then
         git init --bare "$mirror" >&2 \
@@ -156,8 +156,10 @@ materialize_git() {
             || fatal "cannot fetch locked source commit $source_commit from ${recipe[url]}"
     fi
 
-    git --git-dir="$mirror" cat-file -e "$source_commit^{commit}" 2>/dev/null \
-        || fatal "locked source does not resolve to a commit: $source_commit"
+    type=$(git --git-dir="$mirror" cat-file -t "$source_commit") \
+        || fatal "cannot read locked source object $source_commit from cache: $mirror"
+    [[ $type == commit ]] \
+        || fatal "locked source is a $type, not a commit: $source_commit; run: emacsen update $name"
 
     # Keep cached commits reachable without following a moving upstream ref.
     git --git-dir="$mirror" update-ref "refs/emacsen/$source_commit" "$source_commit" \
@@ -174,9 +176,32 @@ materialize_git() {
         source-commit "$source_commit"
 }
 
+# Print the object REF names in the repository at URL, peeled past annotated tags.
+resolve_remote_ref() {
+    local url=$1 ref=$2 remote oid listed extra object='' peeled=''
+
+    # ls-remote lists an annotated tag's own object, and as REF^{} the object it peels to.
+    remote=$(git ls-remote --exit-code "$url" "$ref" "$ref^{}") \
+        || fatal "cannot resolve git ref: $ref"
+    while read -r oid listed extra; do
+        [[ $oid =~ ^[0-9a-f]{40}$ && -z $extra ]] \
+            || fatal "git ref must resolve to exactly one commit: $ref"
+        if [[ $listed == "$ref" && -z $object ]]; then
+            object=$oid
+        elif [[ $listed == "$ref^{}" && -z $peeled ]]; then
+            peeled=$oid
+        else
+            fatal "git ref must resolve to exactly one commit: $ref"
+        fi
+    done <<< "$remote"
+    [[ -n $object ]] || fatal "git ref must resolve to exactly one commit: $ref"
+
+    printf '%s\n' "${peeled:-$object}"
+}
+
 update_source() (
     local name=$1 directory="$root/recipes/$1"
-    local remote remote_commit remote_ref extra line old_commit=none contents scratch
+    local remote_commit line old_commit=none contents scratch
 
     read_recipe "$directory"
     [[ ${recipe[source]-} == git ]] \
@@ -186,17 +211,8 @@ update_source() (
     git check-ref-format "${recipe[ref]}" >/dev/null \
         || fatal "git recipe requires a full ref name: ${recipe[ref]}"
 
-    remote=$(git ls-remote --exit-code "${recipe[url]}" "${recipe[ref]}") \
-        || fatal "cannot resolve git ref: ${recipe[ref]}"
-    [[ $remote != *$'\n'* ]] \
-        || fatal "git ref must resolve to exactly one commit"
-
-    # Split $remote into named variables
-    read -r remote_commit remote_ref extra <<< "$remote"
-    [[ $remote_commit =~ ^[0-9a-f]{40}$ && $remote_ref == "${recipe[ref]}" && -z $extra ]] \
-        || fatal "git ref must resolve to exactly one commit"
-
-    printf -v contents 'ref=%s\ncommit=%s' "$remote_ref" "$remote_commit"
+    remote_commit=$(resolve_remote_ref "${recipe[url]}" "${recipe[ref]}")
+    printf -v contents 'ref=%s\ncommit=%s' "${recipe[ref]}" "$remote_commit"
     if [[ -f $directory/lock ]]; then
         if [[ $(<"$directory/lock") == "$contents" ]]; then
             printf 'emacsen: %s unchanged (%s)\n' "$name" "$remote_commit" >&2

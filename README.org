@@ -33,7 +33,7 @@ Recipe, builder and lock metadata: =key=value= lines and =#= comments, no quotin
 - =26.3= :: Ubuntu 20.04 pinned by digest, =linux/amd64=, GCC 9. Terminal and batch only, with GnuTLS, XML and zlib. Prefix =/opt/emacs/26.3=; not host-installable. Docker's default seccomp profile blocks the ASLR change its dumper needs, so it builds with =CANNOT_DUMP=yes=: standard Lisp loads at every start and =dump-emacs= is unavailable.
 - =ubuntu-26.04= :: Ubuntu 26.04, GCC 14, native compilation, tree-sitter, LTO; variants =x= and =server=. Prefix =/usr/local=; host-installable. Images keep the configured tree at =/build/emacs= and carry =install-info=.
 
-=update NAME= resolves a Git recipe's =ref= in its source repository and rewrites its lock. Builds never change the lock.
+=update NAME= resolves a Git recipe's =ref= in its source repository and rewrites its lock; an annotated tag locks the commit it names. Builds never change the lock and refuse one naming anything but a commit.
 
 #+begin_src sh
 ./emacsen update master
