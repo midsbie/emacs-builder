@@ -103,7 +103,7 @@ Then install the same image on the host; both runs report its ID on stderr:
 ./emacsen install 31.1
 #+end_src
 
-Versions coexist in Emacs's version-named directories. The last install owns the shared files: =bin/emacs= links to its =emacs-VERSION=; =emacsclient=, =etags=, =ebrowse=, the manuals and the man pages are replaced. Each version's record, =/usr/local/lib/emacsen/installed/VERSION=, holds =image-id:=, =image-tag:= and the image's =build-info=. Neither files nor records depend on the image remaining available.
+Versions coexist in Emacs's version-named directories. The last install owns the shared files: =bin/emacs= links to its =emacs-VERSION=; =emacsclient=, =etags=, =ebrowse=, the manuals and the man pages are replaced. Each version's record, =/usr/local/lib/emacsen/installed/VERSION=, holds =image-id:=, =image-tag:= and the image's =build-info=. Neither files nor records depend on the image remaining available. A prefix takes one install at a time, from any checkout: a second is refused while the first holds =lib/emacsen/install.lock=.
 
 * Run and exec
 
