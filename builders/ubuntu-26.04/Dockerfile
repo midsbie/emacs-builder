@@ -13,6 +13,7 @@ RUN apt-get update \
         gcc-14 \
         git \
         gnupg-agent \
+        install-info \
         software-properties-common \
     && rm -rf /var/lib/apt/lists/*
 

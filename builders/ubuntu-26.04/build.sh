@@ -47,10 +47,6 @@ esac
 ./configure "${configure_options[@]}"
 make -j"$(nproc)" bootstrap
 make install
-make install DESTDIR=/out
-find /out -mindepth 1 ! -path /out/usr/local/share/info/dir -printf '%y\t%P\n' \
-    | LC_ALL=C sort > /usr/share/emacsen/manifest
-rm -rf /out
 
 # Layer export can change subsecond ordering between generated inputs and outputs.
 # Equal timestamps leave the retained tree up to date for a later make install.
