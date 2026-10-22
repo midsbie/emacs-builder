@@ -5,7 +5,7 @@ Build Emacs recipes into Docker images. Install an image's Emacs on the host, or
 * Requirements
 
 - Modern Linux, Docker Engine 25+ with BuildKit, access to the daemon.
-- Bash 5, Git, curl, GNU coreutils, findutils and tar.
+- Bash 5, Git, curl, GNU coreutils and findutils.
 - =install=: a rootful daemon and an image whose distribution and release match the host. =docker= group membership is root-equivalent.
 
 #+begin_src sh
@@ -18,34 +18,46 @@ cd emacsen
 
 =recipes/NAME/recipe= defines target =NAME=: a source and a builder under =builders/=. Builder names are not targets.
 
-| Recipe | Source                   | Builder      | Host installation |
-|--------+--------------------------+--------------+-------------------|
-| 26.3   | GNU release tarball      | 26.3         | No                |
-| 31.1   | GNU release tarball      | ubuntu-26.04 | Ubuntu 26.04      |
-| master | Locked Git commit        | ubuntu-26.04 | Ubuntu 26.04      |
-| local  | Working tree in =emacs/= | ubuntu-26.04 | Ubuntu 26.04      |
+| Recipe | Source              | Builder      | Host installation |
+|--------+---------------------+--------------+-------------------|
+| 26.3   | GNU release tarball | 26.3         | No                |
+| 31.1   | GNU release tarball | ubuntu-26.04 | Ubuntu 26.04      |
+| master | Locked Git commit   | ubuntu-26.04 | Ubuntu 26.04      |
 
 Recipe and builder metadata: =key=value= lines and =#= comments, no quoting or expansion. Duplicate, unknown and misplaced keys are refused.
 
 - Recipe :: =source= and =builder= required; =version= optional, checked against the built Emacs. Source keys by kind:
 - =tarball= :: =url=, =sha256=. Downloads are verified and cached at =.emacsen/sources/tarballs/SHA256=.
 - =git= :: =url=, full =ref=. =recipes/NAME/lock= names the commit; a build requires a lock matching =ref=, fetches the commit at depth 1 into =.emacsen/sources/emacs.git= and exports it with =git archive=. Recipes name the GitHub mirror because savannah stalls on shallow fetches; the commit identifies the source.
-- =path= :: =path=, a Git worktree root relative to this repository. The archive holds tracked and untracked-not-ignored files, working-tree edits included; commit and dirty state are recorded. Unresolved conflicts and missing tracked files are refused.
 - Builder :: =builders/NAME/{builder,Dockerfile,build.sh}=: build procedure, dependencies and configure options. =builder= accepts only =variants=, space-separated; without variants the file holds only comments. A builder used by one recipe is named for it; generalise it when a second recipe shares it.
 - =26.3= :: Ubuntu 20.04 pinned by digest, =linux/amd64=, GCC 9. Terminal and batch only, with GnuTLS, XML and zlib. Prefix =/opt/emacs/26.3=; not host-installable. Docker's default seccomp profile blocks the ASLR change its dumper needs, so it builds with =CANNOT_DUMP=yes=: standard Lisp loads at every start and =dump-emacs= is unavailable.
 - =ubuntu-26.04= :: Ubuntu 26.04, GCC 14, native compilation, tree-sitter, LTO; variants =x= and =server=. Prefix =/usr/local=; host-installable. Images keep the configured tree at =/build/emacs= and carry =install-info=.
 
-=update NAME= resolves a Git recipe's =ref= on the remote and rewrites its lock. Builds never change the lock.
+=update NAME= resolves a Git recipe's =ref= in its source repository and rewrites its lock. Builds never change the lock.
 
 #+begin_src sh
 ./emacsen update master
 #+end_src
 
-Only =local= needs the submodule. Initialise it, then check out the upstream ref to build in =emacs/=:
+For local experiments, commit source changes on a branch and create =recipes/experiment/recipe=:
+
+#+begin_example
+source=git
+url=/absolute/path/to/emacs
+ref=refs/heads/experiment
+builder=ubuntu-26.04
+#+end_example
+
+Local Git sources accept absolute paths or =file://= URLs; no push is required. Lock the branch before building:
 
 #+begin_src sh
-git submodule update --init
+./emacsen update experiment
+./emacsen build experiment
 #+end_src
+
+Only the locked commit enters the build. Keep it available for rebuilds with an empty source cache.
+
+=emacs/= is an upstream submodule for analysis; builds do not require it.
 
 * Build
 

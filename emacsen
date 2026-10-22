@@ -68,7 +68,6 @@ read_recipe() {
     case ${recipe[source]-} in
         tarball) check_keys "$file" 'tarball recipe' recipe source url sha256 version builder ;;
         git) check_keys "$file" 'git recipe' recipe source url ref version builder ;;
-        path) check_keys "$file" 'path recipe' recipe source path version builder ;;
         '') fatal "recipe has no source: $file" ;;
         *) fatal "unknown source in $file: ${recipe[source]}" ;;
     esac
@@ -86,7 +85,6 @@ materialize_source() {
     case ${recipe[source]} in
         tarball) materialize_tarball "$scratch" ;;
         git) materialize_git "$scratch" ;;
-        path) materialize_path "$scratch" ;;
         *) fatal "not implemented: ${recipe[source]}" ;;
     esac
 }
@@ -171,59 +169,6 @@ materialize_git() {
         source-url "${recipe[url]}" \
         source-ref "${recipe[ref]}" \
         source-commit "$source_commit"
-}
-
-materialize_path() {
-    local scratch=$1 path source_root commit dirty=false status unmerged file
-
-    [[ -n ${recipe[path]-} && ${recipe[path]} != /* ]] \
-        || fatal "path recipe requires a path relative to the repository root"
-
-    path="$root/${recipe[path]}"
-    [[ -d $path ]] \
-        || fatal "source path is missing: $path; run: git submodule update --init"
-
-    path=$(CDPATH='' cd -- "$path" && pwd -P) \
-        || fatal "cannot resolve source path: $path"
-    # A deinitialised submodule leaves an empty directory inside the parent work tree.
-    [[ -n $(find "$path" -mindepth 1 -maxdepth 1 -print -quit) ]] \
-        || fatal "source path is empty: $path; run: git submodule update --init"
-
-    [[ -d $path/.git || -f $path/.git ]] \
-        || fatal "source path is not a Git worktree root: $path"
-    source_root=$(git -C "$path" rev-parse --show-toplevel 2>/dev/null) \
-        || fatal "cannot read source Git worktree: $path"
-    [[ $source_root == "$path" ]] \
-        || fatal "source path is not a Git worktree root: $path"
-    commit=$(git -C "$path" rev-parse --verify 'HEAD^{commit}' 2>/dev/null) \
-        || fatal "source worktree has no valid HEAD commit: $path"
-
-    unmerged=$(git -C "$path" ls-files --unmerged) \
-        || fatal "cannot read source worktree index: $path"
-    [[ -z $unmerged ]] \
-        || fatal "source worktree has unresolved conflicts: $path; resolve them before building"
-    status=$(git -C "$path" status --porcelain --untracked-files=all) \
-        || fatal "cannot read source worktree status: $path"
-    if [[ -n $status ]]; then dirty=true; fi
-
-    git -C "$path" ls-files -z --cached --others --exclude-standard > "$scratch/source-files" \
-        || fatal "cannot list source worktree files: $path"
-    while IFS= read -r -d '' file; do
-        [[ -e $path/$file || -L $path/$file ]] \
-            || fatal "source worktree file is missing: $path/$file; restore it or stage its removal"
-        [[ -f $path/$file || -L $path/$file ]] \
-            || fatal "source worktree entry is not a file or symlink: $path/$file"
-    done < "$scratch/source-files"
-    tar -C "$path" --null -T "$scratch/source-files" --transform 's,^,emacs/,S' \
-        -cf "$scratch/source/archive" \
-        || fatal "cannot archive source worktree: $path"
-
-    source_sha256=$(sha256sum -- "$scratch/source/archive")
-    source_sha256=${source_sha256%% *}
-    set_source_info \
-        source-path "$path" \
-        source-commit "$commit" \
-        source-dirty "$dirty"
 }
 
 update_source() (
@@ -373,7 +318,7 @@ build_image() (
 
     if [[ ${recipe[source]} == git ]]; then read_git_lock "$directory"; fi
 
-    for command in docker git sha256sum find sort xargs mktemp curl tar; do
+    for command in docker git sha256sum find sort xargs mktemp curl; do
         command -v "$command" >/dev/null || fatal "required command not found: $command"
     done
 
