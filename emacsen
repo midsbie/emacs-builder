@@ -77,6 +77,7 @@ read_recipe() {
 
     [[ ${recipe[builder]-} =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
         || fatal "recipe requires a valid builder name: $file"
+    [[ -n ${recipe[url]-} ]] || fatal "recipe requires a source url: $file"
 }
 
 # Set source_sha256 and source_info in the caller and put the recipe's source in SCRATCH/source.
@@ -106,8 +107,6 @@ set_source_info() {
 materialize_tarball() {
     local scratch=$1 cache download_url
 
-    [[ -n ${recipe[url]-} ]] \
-        || fatal "tarball recipe requires url"
     [[ ${recipe[sha256]-} =~ ^[0-9a-f]{64}$ ]] \
         || fatal "tarball recipe requires a lowercase 64-digit sha256"
 
@@ -121,7 +120,7 @@ materialize_tarball() {
     else
         printf 'emacsen: downloading %s\n' "${recipe[url]}" >&2
         download_url=$(curl --fail --location --show-error --retry 3 --connect-timeout 30 \
-            --output "$scratch/download" --write-out '%{url_effective}' "${recipe[url]}")
+            --output "$scratch/download" --write-out '%{url_effective}' -- "${recipe[url]}")
         printf '%s  %s\n' "$source_sha256" "$scratch/download" | sha256sum --check --strict >&2
         mkdir -p -- "${cache%/*}"
         # The URL goes first so that a cached archive always has one.
@@ -152,7 +151,7 @@ materialize_git() {
         || fatal "source Git cache is not a bare repository: $mirror"
 
     if ! git --git-dir="$mirror" cat-file -e "$source_commit" 2>/dev/null; then
-        git --git-dir="$mirror" fetch --depth 1 --no-tags "${recipe[url]}" "$source_commit" >&2 \
+        git --git-dir="$mirror" fetch --depth 1 --no-tags -- "${recipe[url]}" "$source_commit" >&2 \
             || fatal "cannot fetch locked source commit $source_commit from ${recipe[url]}"
     fi
 
@@ -181,7 +180,7 @@ resolve_remote_ref() {
     local url=$1 ref=$2 remote oid listed extra object='' peeled=''
 
     # ls-remote lists an annotated tag's own object, and as REF^{} the object it peels to.
-    remote=$(git ls-remote --exit-code "$url" "$ref" "$ref^{}") \
+    remote=$(git ls-remote --exit-code -- "$url" "$ref" "$ref^{}") \
         || fatal "cannot resolve git ref: $ref"
     while read -r oid listed extra; do
         [[ $oid =~ ^[0-9a-f]{40}$ && -z $extra ]] \
@@ -206,8 +205,8 @@ update_source() (
     read_recipe "$directory"
     [[ ${recipe[source]-} == git ]] \
         || fatal "nothing to lock for recipe: $name"
-    [[ -n ${recipe[url]-} && -n ${recipe[ref]-} ]] \
-        || fatal "git recipe requires url and ref"
+    [[ -n ${recipe[ref]-} ]] \
+        || fatal "git recipe requires ref: $directory/recipe"
     git check-ref-format "${recipe[ref]}" >/dev/null \
         || fatal "git recipe requires a full ref name: ${recipe[ref]}"
 
@@ -236,8 +235,8 @@ read_git_lock() {
     local hint="run: emacsen update ${directory##*/}"
     local -A lock=()
 
-    [[ -n ${recipe[url]-} && -n ${recipe[ref]-} ]] \
-        || fatal "git recipe requires url and ref"
+    [[ -n ${recipe[ref]-} ]] \
+        || fatal "git recipe requires ref: $directory/recipe"
     git check-ref-format "${recipe[ref]}" >/dev/null \
         || fatal "git recipe requires a full ref name: ${recipe[ref]}"
     [[ -f $file ]] \
