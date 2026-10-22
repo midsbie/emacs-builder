@@ -357,7 +357,7 @@ build_image() (
     materialize_source "$scratch"
 
     printf 'emacsen: building %s\n' "$tag" >&2
-    docker build --pull \
+    docker build --pull --load \
         --tag "$tag" \
         --iidfile "$scratch/image-id" \
         --build-context "source=$scratch/source" \

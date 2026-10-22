@@ -65,7 +65,7 @@ Only the locked commit enters the build. Keep it available for rebuilds with an 
 ./emacsen build 26.3
 #+end_src
 
-A build is one =docker build= tagged =emacsen:NAME=. The builder directory is the context and the source archive enters as a named context, so recipe edits invalidate the compile layer only through its inputs: source, version and variant.
+A build is one =docker build --load= tagged =emacsen:NAME=, loaded into the local Docker image store. The builder directory is the context and the source archive enters as a named context, so recipe edits invalidate the compile layer only through its inputs: source, version and variant.
 
 Variants, for builders that declare them:
 
