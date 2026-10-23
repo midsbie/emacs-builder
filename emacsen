@@ -7,6 +7,14 @@ fatal() {
     exit 1
 }
 
+require_commands() {
+    local command
+
+    for command; do
+        command -v "$command" >/dev/null || fatal "required command not found: $command"
+    done
+}
+
 usage() {
     cat <<'EOF'
 Usage: emacsen build NAME [--variant x|server]
@@ -216,6 +224,7 @@ update_source() (
     local name=$1 directory="$root/recipes/$1"
     local remote_commit line old_commit=none contents scratch
 
+    require_commands git mktemp
     read_recipe "$directory"
     [[ ${recipe[source]-} == git ]] \
         || fatal "nothing to lock for recipe: $name"
@@ -340,9 +349,7 @@ build_image() (
 
     if [[ ${recipe[source]} == git ]]; then read_git_lock "$directory"; fi
 
-    for command in docker git sha256sum find sort xargs mktemp curl flock; do
-        command -v "$command" >/dev/null || fatal "required command not found: $command"
-    done
+    require_commands docker git sha256sum find sort xargs mktemp curl flock
 
     revision=$(git -C "$root" rev-parse --verify HEAD) \
         || fatal "build requires a Git checkout of emacs-builder"
@@ -458,7 +465,7 @@ install_image() (
     done
 
     script=$(<"$installer") || fatal "cannot read install script: $installer"
-    command -v docker >/dev/null || fatal "required command not found: docker"
+    require_commands docker
 
     security_options=$(docker info --format '{{json .SecurityOptions}}') \
         || fatal "cannot access Docker; check the daemon and your Docker permissions"
@@ -535,7 +542,7 @@ run_image() {
         || fatal "not an accessible directory: $directory"
     project=${project%/.}
 
-    command -v docker >/dev/null || fatal "required command not found: docker"
+    require_commands docker
     if ! image_id=$(docker image inspect --format '{{.Id}}' "$tag" 2>/dev/null); then
         docker info >/dev/null 2>&1 \
             || fatal "cannot access Docker; check the daemon and your Docker permissions"
